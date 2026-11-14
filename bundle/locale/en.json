@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote PC (Tailscale)",
+    "description": "Adds MCP tools that control one Windows PC over Tailscale: system information, PowerShell/cmd, screenshots, keyboard and mouse input, sleep prevention, and per-capability switches. The controlled PC must be online, logged in with the screen awake. The first control call must be get_system_info, and the tools should only be used when you explicitly ask the assistant to operate that PC. A disabled capability returns FEATURE_DISABLED instead of running."
+  }
+}

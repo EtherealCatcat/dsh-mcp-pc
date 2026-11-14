@@ -1,0 +1,15 @@
+# Generated controller-side bundle for one controlled PC.
+# This row connects DSH's MCP client to the server running on the remote PC.
+# The URL and bearer token are filled in by the controlled PC's installer;
+# treat this file as a secret.
+- insert:
+    - id: __BUNDLE_ID__
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: __SERVER_NAME__
+        transport: streamable-http
+        url: '__MCP_URL__'
+        headers:
+          Authorization: 'Bearer __TOKEN__'
+        startupTimeoutMs: 15000
+        toolCallTimeoutMs: 660000

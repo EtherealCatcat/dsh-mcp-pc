@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "远程电脑（Tailscale）",
+    "description": "添加一组通过 Tailscale 控制一台 Windows 电脑的 MCP 工具：系统信息、PowerShell/cmd、屏幕截图、键鼠操作、阻止睡眠，以及分功能开关。被控端必须在线、已登录且屏幕唤醒；首次控制必须先调用 get_system_info，且只有在你明确要求操作那台电脑时才应使用。功能被关闭时会返回 FEATURE_DISABLED，而不是执行操作。"
+  }
+}
