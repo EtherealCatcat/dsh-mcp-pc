@@ -1,0 +1,7 @@
+# Gateway bundle: one Host row, one tool namespace for every configured PC.
+# The fleet lives in ./pcs.json (next to index.js); edit it and restart the Host.
+- insert:
+    - id: pc-gateway
+      name: 'dsh-pc-gateway'
+      config:
+        startupTimeoutMs: 3000

@@ -1,0 +1,11 @@
+{
+  "pcs": [
+    {
+      "alias": "office",
+      "displayName": "办公室 PC",
+      "url": "http://100.70.184.108:8765/mcp",
+      "token": "REPLACE_WITH_THE_BEARER_TOKEN",
+      "requestTimeoutMs": 120000
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "dsh-pc-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One DSH tool namespace for many Remote PC targets",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.2-rc.3"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

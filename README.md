@@ -40,6 +40,28 @@ MCP 连接，即可在**已登录、屏幕唤醒**的状态下通过 Tailscale �
 | `set_sleep_block` | 阻止/释放空闲系统睡眠（可选保持显示器常亮） |
 | `control_features` | 查看状态、单项/批量开关、一键全开/全关、重置首次调用门禁 |
 
+## 控制端：两种接入方式
+
+### 方式 A：一台 PC 一个 bundle（默认）
+
+`deploy` 生成的控制端包，一台被控端对应一个插件卡片和一组
+`mcp__<serverName>__*` 工具。适合只控制一两台机器。
+
+### 方式 B：网关模式（多 PC 推荐）
+
+[`gateway/`](gateway/README.md) 是一个独立的控制端 bundle：**一张卡片、7 个 `pc_*` 工具**，
+用 `target` 参数选机器。加一台 PC 只改 `gateway/pcs.json` 并重启 Host，不用重新生成/安装
+被控端包。工具名不再带 `mcp__<serverName>__` 前缀，模型不容易在相似工具名之间选错。
+
+```bash
+cp gateway/pcs.example.json gateway/pcs.json
+chmod 600 gateway/pcs.json      # 填入 alias / url / token
+# 然后在 DSH 里安装 gateway/ 目录（plugin_manager install_bundle）
+```
+
+两种方式可以并存，但同一台 PC 会同时出现两套工具；切换时先确认网关可用，再移除旧的
+`dsh-remote-pc-*` bundle。
+
 ### 强制策略（服务器会执行）
 
 1. **首次调用门禁**：每个服务进程启动后，除 `get_system_info` 和 `control_features` 外的工具都会返回

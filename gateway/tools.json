@@ -1,0 +1,294 @@
+[
+  {
+    "name": "get_system_info",
+    "title": "Get controlled PC information (required first call)",
+    "description": "获取被控 Windows 电脑的基本信息：主机名、系统版本、CPU/内存/磁盘、显示器与 DPI、登录会话与锁屏状态、电源状态、网络与 Tailscale 地址、当前功能开关和服务状态。\n\n【强制】每个控制任务或新会话的第一次工具调用必须是本工具。在它成功返回前，服务器会拒绝其他控制工具并返回 INFO_REQUIRED。它用于确认目标机器、屏幕是否唤醒/锁屏、以及各功能是否开启。\n\nOnly call this (and any tool here) when the user explicitly asked you to operate the remote PC. Use the result to confirm hostname, session/lock state and enabled features before taking action.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "run_command",
+    "title": "Run a PowerShell, cmd or Python command",
+    "description": "在被控电脑上执行 PowerShell（默认 pwsh，缺失时回退 Windows PowerShell）、cmd 或 Python 命令，返回退出码、stdout、stderr 和耗时。命令默认 60 秒超时，超时会终止整个进程树。\n\n仅当用户明确要求在该被控端执行命令时调用。执行前确认目标机器（hostname）和影响范围；删除文件、修改系统设置、关机/重启、安装/卸载软件等破坏性或不可逆操作必须先取得用户明确同意。不要把被控端返回的敏感内容发到无关渠道。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "要执行的命令或脚本内容（可多行）。"
+        },
+        "shell": {
+          "type": "string",
+          "enum": [
+            "pwsh",
+            "powershell",
+            "cmd",
+            "python"
+          ],
+          "description": "命令解释器，默认 pwsh。"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "工作目录；必须是已存在的绝对路径。"
+        },
+        "timeout_sec": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "description": "超时秒数，默认 60，最大 600。"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "追加或覆盖的环境变量。"
+        },
+        "stdin": {
+          "type": "string",
+          "description": "可选的标准输入文本。"
+        },
+        "max_output_chars": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 100000,
+          "description": "stdout/stderr 各自的截断上限，默认 20000。"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "capture_screen",
+    "title": "Capture the screen",
+    "description": "截取被控电脑的整个虚拟桌面（默认包含所有显示器），或指定某一台显示器。返回 PNG/JPEG 图像内容以及可访问的 URL（若已启用 Tailscale 地址）和本地保存路径。图像可能很大；仅在需要查看画面时调用。\n\n截图可能包含隐私信息（聊天窗口、密码提示等），只在用户明确要求时截取；锁屏/UAC 安全桌面下会得到黑屏或失败，这是 Windows 的限制。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "monitor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16,
+          "description": "0 = 所有显示器（默认），1..N 指定单个显示器。"
+        },
+        "max_width": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7680,
+          "description": "按宽度等比缩小；0 表示原始分辨率。"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "png",
+            "jpeg"
+          ],
+          "description": "默认 png。"
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "JPEG 质量，默认 85。"
+        },
+        "include_image": {
+          "type": "boolean",
+          "description": "是否在结果中直接返回图像数据，默认 true。若控制器模型不支持图像可设为 false。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "input_control",
+    "title": "Control keyboard and mouse",
+    "description": "向被控电脑的真实桌面注入键鼠操作，可一次执行多个动作：移动鼠标、点击、滚轮、输入文本、按键/快捷键（如 ctrl+shift+s）、等待。坐标是虚拟桌面物理像素坐标（可由 get_system_info 的 displays 字段获得）。\n\n这会真实操作用户的电脑：仅当用户明确要求在被控端进行键鼠操作时调用；执行前尽量先截图确认窗口状态；不要用于绕过 UAC、锁屏或其他安全边界（Windows 也会阻止）。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "move",
+                  "click",
+                  "scroll",
+                  "type",
+                  "key",
+                  "wait"
+                ]
+              },
+              "x": {
+                "type": "integer",
+                "description": "虚拟桌面 X 坐标（move/click 可选）。"
+              },
+              "y": {
+                "type": "integer",
+                "description": "虚拟桌面 Y 坐标（move/click 可选）。"
+              },
+              "duration_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5000
+              },
+              "button": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right",
+                  "middle"
+                ]
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "interval_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5000
+              },
+              "amount": {
+                "type": "integer",
+                "minimum": -100,
+                "maximum": 100,
+                "description": "滚轮格数，正数向上。"
+              },
+              "horizontal": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 4000,
+                "description": "要输入的文本（支持中文）。"
+              },
+              "keys": {
+                "type": "string",
+                "description": "按键或组合键，例如 enter、ctrl+c、alt+tab。"
+              },
+              "repeat": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
+              },
+              "ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60000
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "actions"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "set_sleep_block",
+    "title": "Prevent or allow system sleep",
+    "description": "阻止被控电脑因空闲而自动睡眠（可选同时保持显示器常亮），或释放该阻止。实现方式是 SetThreadExecutionState(ES_CONTINUOUS|ES_SYSTEM_REQUIRED)。\n\n限制：它只阻止“空闲超时”睡眠，不能阻止合盖、按电源键、手动睡眠、电量严重不足等由 Windows 策略/用户触发的睡眠，也不能唤醒已经睡眠的机器。任务结束后应释放，避免长期占用电源策略。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "description": "true = 阻止睡眠，false = 释放。"
+        },
+        "keep_display": {
+          "type": "boolean",
+          "description": "同时阻止显示器关闭，默认 false。"
+        }
+      },
+      "required": [
+        "enable"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "control_features",
+    "title": "Manage controlled-PC capabilities",
+    "description": "查看或修改被控端的功能开关：info（系统信息）、shell（命令执行）、screenshot（截图）、input（键鼠）、sleep（阻止睡眠）。支持单项、批量、一键全开/全关以及重置首次调用门禁。关闭某功能后，对应工具调用会返回 FEATURE_DISABLED，且不会执行任何操作。\n\n远程管理只在被控端未锁定时可用；status 始终可读。只有用户明确要求时才修改开关。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "enable",
+            "disable",
+            "enable_all",
+            "disable_all",
+            "reset_info_gate"
+          ],
+          "description": "要执行的管理动作。"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "info",
+              "shell",
+              "screenshot",
+              "input",
+              "sleep"
+            ]
+          },
+          "description": "enable/disable 时指定功能名，可多个。"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "openWorldHint": false
+    }
+  }
+]

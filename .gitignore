@@ -1,0 +1,14 @@
+# Runtime and generated artifacts
+__pycache__/
+*.pyc
+.tmp/
+dist/
+*.log
+
+# Never commit real pairing material
+config.json
+state.json
+PAIRING.txt
+
+# Gateway fleet config (contains bearer tokens)
+gateway/pcs.json

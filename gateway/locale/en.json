@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote PCs (gateway)",
+    "description": "Manage many remote PCs behind one target parameter instead of one tool namespace per PC"
+  }
+}
