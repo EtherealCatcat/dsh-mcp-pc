@@ -1,10 +1,10 @@
 /**
- * DSH Remote PC — gateway mode.
+ * DSH Remote PC — gateway.
  *
  * One Host plugin exposes the whole fleet behind seven `pc_*` tools. Every
  * remote call takes a `target` alias and forwards `tools/call` to that PC's
- * stateless Streamable HTTP MCP endpoint, so adding a PC is a config edit and
- * a Host restart — not another mcp-client instance and another tool prefix.
+ * stateless Streamable HTTP MCP endpoint; adding a PC is a config edit and a
+ * plugin reload.
  */
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'

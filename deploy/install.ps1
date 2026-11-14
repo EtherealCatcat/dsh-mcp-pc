@@ -6,8 +6,9 @@
 .DESCRIPTION
   Copies the server and local control CLI, creates config.json/state.json with a
   fresh bearer token, registers logon autostart, opens a Tailscale-scoped
-  firewall rule when elevated, starts the server, and generates the
-  controller-side DSH bundle.
+  firewall rule when elevated, starts the server, and writes a gateway entry
+  (gateway-entry.json) plus PAIRING.txt for the controller-side dsh-pc-gateway
+  plugin.
 
 .PARAMETER InstallDir
   Application directory (default: %LOCALAPPDATA%\DSHRemotePC\app).
@@ -22,12 +23,17 @@
 .PARAMETER Bind
   tailscale (default), address, or all.
 
+.PARAMETER Alias
+  Controller-side target name for this PC, matching [A-Za-z0-9_-]{1,16}.
+  Default: a slug derived from the hostname.
+
 .PARAMETER PublicHost
-  Hostname or IP to embed in the controller bundle and screenshot URLs. Default:
+  Hostname or IP to embed in the gateway entry and screenshot URLs. Default:
   the first Tailscale IPv4 address.
 
 .PARAMETER RotateToken
-  Generate a new bearer token (invalidates previously generated bundles).
+  Generate a new bearer token (the controller's existing pcs.json entry stops
+  working until its token is updated).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
@@ -44,6 +50,7 @@ param(
     [string] $Bind = 'tailscale',
     [string] $BindAddress = '',
     [string] $PublicHost = '',
+    [string] $Alias = '',
     [string] $PythonPath = '',
     [switch] $RotateToken,
     [switch] $NoAutostart,
@@ -64,6 +71,14 @@ $firewallPrefix = 'DSH Remote PC'
 function Write-Step([string] $Message) {
     Write-Host ''
     Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Get-DefaultAlias([string] $Hostname) {
+    $slug = ($Hostname.ToLowerInvariant() -replace '[^a-z0-9_-]+', '-').Trim('-')
+    if (-not $slug) { $slug = 'pc' }
+    if ($slug.Length -gt 16) { $slug = $slug.Substring(0, 16).Trim('-') }
+    if (-not $slug) { $slug = 'pc' }
+    return $slug
 }
 
 function Get-PythonPath([string] $Explicit) {
@@ -181,10 +196,17 @@ function Set-FirewallRule {
 }
 
 if ($env:OS -ne 'Windows_NT') { throw 'This installer is for Windows.' }
+$hostname = [System.Net.Dns]::GetHostName()
+$aliasName = $Alias.Trim()
+if (-not $aliasName) { $aliasName = Get-DefaultAlias $hostname }
+if ($aliasName -notmatch '^[A-Za-z0-9_-]{1,16}$') {
+    throw "Alias '$aliasName' must match [A-Za-z0-9_-]{1,16}."
+}
 Write-Host "DSH Remote PC installer" -ForegroundColor Green
 Write-Host "  source : $sourceRoot"
 Write-Host "  install: $InstallDir"
 Write-Host "  data   : $DataDir"
+Write-Host "  alias  : $aliasName"
 
 if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'server\dshpc_server.py'))) {
     throw "server sources not found under $sourceRoot (expected server\dshpc_server.py)"
@@ -206,7 +228,7 @@ Stop-Server
 Write-Step 'Installing application files'
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 if ($sourceRoot -ne $InstallDir) {
-    foreach ($folder in @('server', 'control', 'bundle', 'deploy')) {
+    foreach ($folder in @('server', 'control', 'deploy')) {
         $destination = Join-Path $InstallDir $folder
         if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
         Copy-Item -LiteralPath (Join-Path $sourceRoot $folder) -Destination $destination -Recurse -Force
@@ -217,6 +239,11 @@ if ($sourceRoot -ne $InstallDir) {
     }
 } else {
     Write-Host '  already running from the install directory; skipping the copy step.'
+}
+$legacyBundle = Join-Path $InstallDir 'bundle'
+if (Test-Path -LiteralPath $legacyBundle) {
+    Remove-Item -LiteralPath $legacyBundle -Recurse -Force
+    Write-Host '  removed legacy bundle/ template from the install directory.'
 }
 [IO.File]::WriteAllText((Join-Path $InstallDir 'VERSION'), "dsh-pc-remote 1.0.0`r`n", (New-Object System.Text.UTF8Encoding($false)))
 [IO.File]::WriteAllText((Join-Path $InstallDir 'python-path.txt'), $pythonExe, (New-Object System.Text.UTF8Encoding($false)))
@@ -285,27 +312,58 @@ if (-not $NoStart) {
     Write-Host "  healthy on http://127.0.0.1:$Port/healthz"
 }
 
-Write-Step 'Generating the controller bundle'
-$bundleScript = Join-Path $InstallDir 'deploy\make-bundle.ps1'
-$bundleSource = Join-Path $InstallDir 'bundle'
-$bundle = & $bundleScript -DataDir $DataDir -SourceBundle $bundleSource -Url $pairing.mcp_url -Force
-Write-Host "  bundle : $($bundle.BundleDir)"
-Write-Host "  zip    : $($bundle.ZipPath)"
-Write-Host "  pairing: $($bundle.PairingPath)"
+Write-Step 'Writing the gateway entry'
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$gatewayEntryPath = Join-Path $DataDir 'gateway-entry.json'
+$gatewayEntry = [ordered]@{
+    alias = $aliasName
+    displayName = $hostname
+    url = [string]$pairing.mcp_url
+    token = [string]$pairing.token
+    requestTimeoutMs = 120000
+}
+$gatewayEntryJson = $gatewayEntry | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText($gatewayEntryPath, $gatewayEntryJson + "`r`n", $utf8)
+
+$pairingLines = @(
+    '=== DSH 远程电脑配对信息 / gateway entry ===',
+    "host / 主机        : $hostname",
+    "alias / 别名       : $aliasName",
+    "MCP URL            : $($pairing.mcp_url)",
+    "Bearer token       : $($pairing.token)",
+    "entry / 条目       : $gatewayEntryPath",
+    "created / 生成时间 : $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'))",
+    '',
+    '使用 / usage:',
+    '  1. 把 gateway-entry.json 合并进控制端 gateway/pcs.json 的 pcs 数组（alias 必须唯一）。',
+    '  2. 重载“远程电脑”插件（关闭再开启，或重启 DSH）。',
+    "  3. 调用 pc_list，再用 pc_sysinfo target=$aliasName 验证主机名。",
+    '',
+    '安全 / security:',
+    '  - gateway-entry.json / PAIRING.txt 含真实 Bearer token，合并后删除或按凭据保管。',
+    '  - 被控端可在本机运行 dshpc all-off / dshpc remote-control off 随时收紧权限。'
+)
+$pairingText = ($pairingLines -join "`r`n") + "`r`n"
+$pairingPath = Join-Path $DataDir 'PAIRING.txt'
+[IO.File]::WriteAllText($pairingPath, $pairingText, $utf8)
+Write-Host "  entry  : $gatewayEntryPath"
+Write-Host "  pairing: $pairingPath"
 
 $controlScript = Join-Path $InstallDir 'control\dshpc.cmd'
 $endpoints = @($pairing.urls) | ForEach-Object { "$_/mcp" }
 Write-Step 'Installed'
+Write-Host "  host         : $hostname"
+Write-Host "  alias        : $aliasName"
 Write-Host "  endpoints    : $($endpoints -join ', ')"
-Write-Host "  serverName   : $($bundle.ServerName)"
-Write-Host "  tool prefix  : mcp__$($bundle.ServerName)__"
+Write-Host "  gateway entry: $gatewayEntryPath"
+Write-Host "  pairing      : $pairingPath"
 Write-Host "  token        : $($pairing.token)"
 Write-Host "  autostart    : $autostart"
 Write-Host "  firewall     : $firewall"
 Write-Host "  local control: `"$controlScript`" status"
 Write-Host ''
-Write-Host 'Next: copy the zip to the controller machine and install it as a DSH plugin.' -ForegroundColor Green
-Write-Host 'See REMOTE-SETUP.md (or PAIRING.txt inside the bundle) for the exact steps.'
+Write-Host 'Next: copy gateway-entry.json to the controller, merge it into gateway/pcs.json, and reload the dsh-pc-gateway plugin.' -ForegroundColor Green
+Write-Host 'See REMOTE-SETUP.md for the exact steps.'
 Write-Host ''
 Write-Host 'Local control examples:' -ForegroundColor Green
 Write-Host "  `"$controlScript`" status"

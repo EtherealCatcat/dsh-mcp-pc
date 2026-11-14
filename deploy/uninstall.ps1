@@ -9,6 +9,9 @@
   Configuration, logs, screenshots and the bearer token stay in the data
   directory unless -Purge is given.
 
+  The controller-side gateway/pcs.json entry is not reachable from here; remove
+  that entry on the controller after uninstalling.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\deploy\uninstall.ps1
 
@@ -136,3 +139,4 @@ if ($Purge) {
 
 Write-Host ''
 Write-Host 'Uninstalled. The PC no longer accepts remote DSH control.' -ForegroundColor Green
+Write-Host 'On the controller, remove this PC from gateway/pcs.json and reload the dsh-pc-gateway plugin.'

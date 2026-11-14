@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Remote PCs (gateway)",
-    "description": "Manage many remote PCs behind one target parameter instead of one tool namespace per PC"
+    "title": "Remote PCs",
+    "description": "One gateway for many controlled PCs: pc_list shows the fleet; pc_sysinfo, pc_run, pc_screenshot, pc_input, pc_sleep and pc_features take a target alias. Add a PC by editing gateway/pcs.json and reloading the plugin; no reinstall. Use only when the user explicitly asks to operate that PC."
   }
 }

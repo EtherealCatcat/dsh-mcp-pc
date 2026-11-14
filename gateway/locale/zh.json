@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "远程电脑（网关）",
-    "description": "用一个 target 参数管理多台远程 PC，工具不再按机器复制"
+    "title": "远程电脑",
+    "description": "用一个网关管理多台被控端：pc_list 查看机器；pc_sysinfo、pc_run、pc_screenshot、pc_input、pc_sleep、pc_features 用 target 选择机器。添加机器只改 gateway/pcs.json 并重载插件，不需要重装。仅在用户明确要求操作某台机器时使用。"
   }
 }

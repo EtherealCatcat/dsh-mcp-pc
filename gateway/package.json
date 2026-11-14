@@ -1,13 +1,25 @@
 {
   "name": "dsh-pc-gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "One DSH tool namespace for many Remote PC targets",
+  "description": "One DSH gateway for many Remote PC targets over Tailscale",
   "main": "./index.js",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
   },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "tools.json",
+    "pcs.example.json",
+    "README.md"
+  ],
   "peerDependencies": {
     "@deepseek-ai/dsh-mcp-client": ">=0.2.2-rc.3"
   },

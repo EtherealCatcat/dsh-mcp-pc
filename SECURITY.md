@@ -57,20 +57,31 @@ DSH Remote PC 把一台真实 Windows 电脑的用户级控制权暴露给 Tails
 - 被控端不要开启 Tailscale Funnel / subnet router 把端口暴露到公网；
 - 如使用 MagicDNS，可把 `-PublicHost` 设为 `host.tailnet.ts.net`，避免 IP 变化后重新配对。
 
+## 控制端网关的额外风险
+
+控制端只安装一个 `dsh-pc-gateway` 插件，它在 `gateway/pcs.json` 中汇总所有被控端的地址和 token：
+
+- 控制端被攻破或 `pcs.json` 泄露，等同于同时泄露所有已配置被控端的控制权；请按凭据目录保护它；
+- `gateway/pcs.json` 应设为 `0600`（Windows 上用 ACL 收紧），且已被本项目的 `.gitignore` 排除；
+- `target` 只是选择机器的参数，**不是权限边界**：能调用工具的人可以在任意已配置机器之间切换。
+  重要操作前先用 `pc_sysinfo` 核对主机名，不要把“模型选错 target”当成安全隔离；
+- 不再需要某台机器时，从 `pcs.json` 删除条目并重载插件，同时在那个被控端轮换 token。
+
 ## token 管理
 
-- token 保存在被控端 `<数据目录>\config.json`，以及控制端插件的 `cordis.patch.yml` / `PAIRING.txt`。
-- 不要提交到 Git、不要发到聊天/截图/工单；插件目录应视为凭据目录。
+- token 保存在被控端 `<数据目录>\config.json`，以及控制端的 `gateway/pcs.json`；
+  被控端生成的 `gateway-entry.json` 和 `PAIRING.txt` 也含 token，合并后应删除或按凭据保管。
+- 不要提交到 Git、不要发到聊天/截图/工单；控制端的 `gateway/` 目录应视为凭据目录。
 - 怀疑泄露时：
 
 ```powershell
-# 被控端
-.\deploy\install.ps1 -RotateToken        # 重新生成并重启
-.\deploy\make-bundle.ps1                  # 生成新控制端包
-# 控制端：移除旧插件，安装新 bundle，新建会话
+# 被控端：重新生成 token 并重启
+.\deploy\install.ps1 -RotateToken
+
+# 控制端：把新生成的 gateway-entry.json 合并/覆盖到 pcs.json 对应条目，重载“远程电脑”插件
 ```
 
-- 建议定期轮换，并删除不再使用的控制端插件。
+- 建议定期轮换；删除机器时同时删除其 `pcs.json` 条目，并清理旧的 `gateway-entry.json` / `PAIRING.txt`。
 
 ## 数据与隐私
 
@@ -101,7 +112,7 @@ DSH Remote PC 把一台真实 Windows 电脑的用户级控制权暴露给 Tails
 1. 被控端立即执行 `dshpc all-off`（或 `dshpc stop`，再 `dshpc remote-control off`）；
 2. 断开/限制该设备在 Tailscale ACL 中的访问；
 3. 检查 `<数据目录>\logs\server.log` 中的工具调用与命令；
-4. 轮换 token，重新生成控制端 bundle，并移除不认识的插件；
+4. 轮换 token，更新或删除控制端 `gateway/pcs.json` 中的对应条目，并移除不认识的插件；
 5. 检查系统是否有异常进程、计划任务、启动项与新增账户；
 6. 如涉及敏感数据，按组织安全流程处理。
 
