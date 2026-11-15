@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
   Install and start the DSH Remote PC controlled-side service on this Windows PC.
@@ -25,7 +25,20 @@
 
 .PARAMETER Alias
   Controller-side target name for this PC, matching [A-Za-z0-9_-]{1,16}.
-  Default: a slug derived from the hostname.
+  Default: the alias already published by a previous install, else a slug
+  derived from the hostname. When omitted in an interactive console the
+  installer asks for it; press Enter to accept the default in brackets.
+
+.PARAMETER DisplayName
+  Human-facing name shown next to the alias in controller tool descriptions.
+  Default: the display name of a previous install, else the hostname. Also
+  asked for interactively when omitted.
+
+.PARAMETER Unattended
+  Never prompt. Missing values fall back to their defaults. Use this for
+  scripts, remote invocations, and other non-interactive runs; the installer
+  detects a redirected stdin as non-interactive on its own and then behaves
+  the same way.
 
 .PARAMETER PublicHost
   Hostname or IP to embed in the gateway entry and screenshot URLs. Default:
@@ -35,11 +48,26 @@
   Generate a new bearer token (the controller's existing pcs.json entry stops
   working until its token is updated).
 
+.PARAMETER ShowToken
+  Print the full bearer token once at the end. By default only the first and
+  last four characters are shown; the real token stays in the pairing files.
+
+.PARAMETER PairingCode
+  Print the gateway entry as a single base64 line instead of showing the token
+  (useful for copy/paste between machines). Mutually exclusive with
+  -ShowToken; the encoded line is still a credential.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
 
 .EXAMPLE
-  .\deploy\install.ps1 -Port 8765 -RotateToken
+  .\deploy\install.ps1 -Alias office -DisplayName 'Office PC'
+
+.EXAMPLE
+  .\deploy\install.ps1 -Unattended -Alias lab-vm -RotateToken
+
+.EXAMPLE
+  .\deploy\install.ps1 -PairingCode
 #>
 [CmdletBinding()]
 param(
@@ -51,8 +79,12 @@ param(
     [string] $BindAddress = '',
     [string] $PublicHost = '',
     [string] $Alias = '',
+    [string] $DisplayName = '',
     [string] $PythonPath = '',
     [switch] $RotateToken,
+    [switch] $Unattended,
+    [switch] $ShowToken,
+    [switch] $PairingCode,
     [switch] $NoAutostart,
     [switch] $NoFirewall,
     [switch] $NoStart,
@@ -120,9 +152,13 @@ function Get-ServerPid {
 }
 
 function Stop-Server {
+    # Only touch the task when it actually serves this data directory; a
+    # self-test or a second install must not kill an unrelated running server.
     try {
         $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-        if ($task -and $task.State -eq 'Running') {
+        $taskArguments = ''
+        if ($task) { $taskArguments = (@($task.Actions) | ForEach-Object { [string]$_.Arguments }) -join ' ' }
+        if ($task -and $task.State -eq 'Running' -and $taskArguments -like "*$DataDir*") {
             Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
             Start-Sleep -Milliseconds 300
         }
@@ -200,17 +236,85 @@ function Set-FirewallRule {
 }
 
 if ($env:OS -ne 'Windows_NT') { throw 'This installer is for Windows.' }
-$hostname = [System.Net.Dns]::GetHostName()
-$aliasName = $Alias.Trim()
-if (-not $aliasName) { $aliasName = Get-DefaultAlias $hostname }
-if ($aliasName -notmatch '^[A-Za-z0-9_-]{1,16}$') {
-    throw "Alias '$aliasName' must match [A-Za-z0-9_-]{1,16}."
+if ($ShowToken -and $PairingCode) {
+    throw 'Choose either -ShowToken or -PairingCode, not both.'
 }
+$hostname = [System.Net.Dns]::GetHostName()
+
+function Format-Token([string] $Value) {
+    if (-not $Value) { return '(none)' }
+    if ($Value.Length -le 10) { return '****' }
+    return $Value.Substring(0, 4) + '****' + $Value.Substring($Value.Length - 4)
+}
+
+function Test-InteractiveConsole {
+    if ($Unattended) { return $false }
+    try { return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected } catch { return $false }
+}
+
+# A reinstall keeps the alias and display name already published to the
+# controller; deriving them from the hostname would silently rename the PC.
+$existingEntryPath = Join-Path $DataDir 'gateway-entry.json'
+$existingAlias = ''
+$existingDisplayName = ''
+if (Test-Path -LiteralPath $existingEntryPath) {
+    try {
+        $existingEntry = (Get-Content -LiteralPath $existingEntryPath -Raw) | ConvertFrom-Json
+        if ($existingEntry.alias) { $existingAlias = [string]$existingEntry.alias }
+        if ($existingEntry.displayName) { $existingDisplayName = [string]$existingEntry.displayName }
+    } catch { }
+}
+$defaultAlias = $existingAlias.Trim()
+if ($defaultAlias -notmatch '^[A-Za-z0-9_-]{1,16}$') { $defaultAlias = Get-DefaultAlias $hostname }
+$defaultDisplayName = $existingDisplayName.Trim()
+if (-not $defaultDisplayName) { $defaultDisplayName = $hostname }
+
+$aliasName = $Alias.Trim()
+if (-not $aliasName -and $env:DSHPC_ALIAS) { $aliasName = $env:DSHPC_ALIAS.Trim() }
+$displayName = $DisplayName.Trim()
+if (-not $displayName -and $env:DSHPC_DISPLAY_NAME) { $displayName = $env:DSHPC_DISPLAY_NAME.Trim() }
+$interactive = Test-InteractiveConsole
+
 Write-Host "DSH Remote PC installer" -ForegroundColor Green
 Write-Host "  source : $sourceRoot"
 Write-Host "  install: $InstallDir"
 Write-Host "  data   : $DataDir"
-Write-Host "  alias  : $aliasName"
+
+if ($interactive -and (-not $aliasName -or -not $displayName)) {
+    Write-Host ''
+    Write-Host 'This PC has no -Alias / -DisplayName yet; press Enter to accept the bracketed default.' -ForegroundColor Cyan
+}
+if (-not $aliasName) {
+    if ($interactive) {
+        for ($attempt = 0; $attempt -lt 3 -and -not $aliasName; $attempt++) {
+            $answer = (Read-Host "  alias [$defaultAlias]").Trim()
+            if (-not $answer) { $aliasName = $defaultAlias; break }
+            if ($answer -match '^[A-Za-z0-9_-]{1,16}$') { $aliasName = $answer; break }
+            Write-Warning "alias '$answer' must match [A-Za-z0-9_-]{1,16}."
+        }
+    } else {
+        $aliasName = $defaultAlias
+    }
+}
+if (-not $displayName) {
+    if ($interactive) {
+        $answer = (Read-Host "  displayName [$defaultDisplayName]").Trim()
+        if ($answer) { $displayName = $answer } else { $displayName = $defaultDisplayName }
+    } else {
+        $displayName = $defaultDisplayName
+    }
+}
+$displayName = ($displayName -replace '[\x00-\x1F]', '').Trim()
+if (-not $displayName) { $displayName = $defaultDisplayName }
+if ($displayName.Length -gt 48) { $displayName = $displayName.Substring(0, 48).Trim() }
+if (-not $aliasName) {
+    throw 'No valid alias was chosen; pass -Alias ([A-Za-z0-9_-]{1,16}) or answer the prompt.'
+}
+if ($aliasName -notmatch '^[A-Za-z0-9_-]{1,16}$') {
+    throw "Alias '$aliasName' must match [A-Za-z0-9_-]{1,16}."
+}
+Write-Host "  alias   : $aliasName"
+Write-Host "  display : $displayName"
 
 if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'server\dshpc_server.py'))) {
     throw "server sources not found under $sourceRoot (expected server\dshpc_server.py)"
@@ -266,7 +370,7 @@ if ($RotateToken) { $initArgs += '--rotate-token' }
 $initOutput = (& $pythonExe @initArgs) -join "`n"
 try { $pairing = $initOutput | ConvertFrom-Json } catch { throw "Could not parse --init output: $initOutput" }
 if (-not $pairing.token) { throw 'The server did not return a bearer token.' }
-Write-Host "  token  : $($pairing.token)"
+Write-Host "  token  : $(Format-Token ([string]$pairing.token)) (masked; the full value is written to the pairing files)"
 Write-Host "  mcp    : $($pairing.mcp_url)"
 
 if (-not $NoAutostart) {
@@ -325,7 +429,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $gatewayEntryPath = Join-Path $DataDir 'gateway-entry.json'
 $gatewayEntry = [ordered]@{
     alias = $aliasName
-    displayName = $hostname
+    displayName = $displayName
     url = [string]$pairing.mcp_url
     token = [string]$pairing.token
 }
@@ -333,46 +437,74 @@ $gatewayEntryJson = $gatewayEntry | ConvertTo-Json -Depth 4
 [IO.File]::WriteAllText($gatewayEntryPath, $gatewayEntryJson + "`r`n", $utf8)
 
 $pairingLines = @(
-    '=== DSH 远程电脑配对信息 / gateway entry ===',
-    "host / 主机        : $hostname",
-    "alias / 别名       : $aliasName",
-    "MCP URL            : $($pairing.mcp_url)",
-    "Bearer token       : $($pairing.token)",
-    "entry / 条目       : $gatewayEntryPath",
-    "created / 生成时间 : $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'))",
+    '=== DSH Remote PC pairing info / gateway entry ===',
+    "host                 : $hostname",
+    "alias                : $aliasName",
+    "displayName          : $displayName",
+    "MCP URL              : $($pairing.mcp_url)",
+    "Bearer token         : $($pairing.token)",
+    "entry                : $gatewayEntryPath",
+    "created              : $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'))",
     '',
-    '使用 / usage:',
-    '  1. 把 gateway-entry.json 合并进控制端 gateway/pcs.json 的 pcs 数组（alias 必须唯一）。',
-    '  2. 重载“远程电脑”插件（关闭再开启，或重启 DSH）。',
-    "  3. 调用 pc_list，再用 pc_sysinfo target=$aliasName 验证主机名。",
+    'usage:',
+    '  1. Merge gateway-entry.json into the gateway/pcs.json pcs array on the controller (alias must be unique).',
+    '  2. Reload the dsh-pc-gateway plugin (disable then enable, or restart DSH).',
+    "  3. Call pc_list, then pc_sysinfo target=$aliasName to confirm the hostname.",
     '',
-    '安全 / security:',
-    '  - gateway-entry.json / PAIRING.txt 含真实 Bearer token，合并后删除或按凭据保管。',
-    '  - 被控端可在本机运行 dshpc all-off / dshpc remote-control off 随时收紧权限。'
+    'security:',
+    '  - gateway-entry.json / PAIRING.txt contain the real bearer token; delete them after merging or store them as credentials.',
+    '  - On this PC, dshpc all-off / dshpc remote-control off tighten permissions at any time.'
 )
 $pairingText = ($pairingLines -join "`r`n") + "`r`n"
 $pairingPath = Join-Path $DataDir 'PAIRING.txt'
 [IO.File]::WriteAllText($pairingPath, $pairingText, $utf8)
-Write-Host "  entry  : $gatewayEntryPath"
-Write-Host "  pairing: $pairingPath"
+# Both files carry the bearer token, so keep them readable by this account only.
+foreach ($secretPath in @($gatewayEntryPath, $pairingPath)) {
+    & icacls.exe $secretPath /inheritance:r /grant:r "$($env:USERNAME):(F)" 2>$null | Out-Null
+}
 
 $controlScript = Join-Path $InstallDir 'control\dshpc.cmd'
 $endpoints = @($pairing.urls) | ForEach-Object { "$_/mcp" }
-Write-Step 'Installed'
+$tokenPreview = Format-Token ([string]$pairing.token)
+
+Write-Host ''
+Write-Host 'Installed - the controlled-side setup on this PC is complete.' -ForegroundColor Green
+Write-Host 'The service is running and autostarts at logon; nothing else is pending on this PC.' -ForegroundColor DarkGray
+Write-Host ''
 Write-Host "  host         : $hostname"
 Write-Host "  alias        : $aliasName"
-Write-Host "  endpoints    : $($endpoints -join ', ')"
-Write-Host "  gateway entry: $gatewayEntryPath"
-Write-Host "  pairing      : $pairingPath"
-Write-Host "  token        : $($pairing.token)"
+Write-Host "  displayName  : $displayName"
+Write-Host "  endpoint     : $($pairing.mcp_url)"
 Write-Host "  autostart    : $autostart"
 Write-Host "  firewall     : $firewall"
-Write-Host "  local control: `"$controlScript`" status"
+Write-Host "  token        : $tokenPreview (full value lives in the pairing files below)"
 Write-Host ''
-Write-Host 'Next: copy gateway-entry.json to the controller, merge it into gateway/pcs.json, and reload the dsh-pc-gateway plugin.' -ForegroundColor Green
+Write-Host 'Pairing files (contain the real bearer token; delete them after merging):' -ForegroundColor Cyan
+Write-Host "  $gatewayEntryPath"
+Write-Host "  $pairingPath"
+if ($ShowToken) {
+    Write-Host ''
+    Write-Host 'Full bearer token (printed because -ShowToken was passed):' -ForegroundColor Yellow
+    Write-Host "  $($pairing.token)"
+    Write-Host '  Do not copy this into a shared screen, recording, or chat transcript.' -ForegroundColor Yellow
+}
+if ($PairingCode) {
+    $entryBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($gatewayEntryJson))
+    Write-Host ''
+    Write-Host 'Pairing code (base64 of gateway-entry.json; decode it into the controller entry):' -ForegroundColor Yellow
+    Write-Host "  $entryBase64"
+    Write-Host '  This line is a credential; treat it like the token itself.' -ForegroundColor Yellow
+}
+Write-Host ''
+Write-Host 'Next step: register this PC on the controller.' -ForegroundColor Green
+Write-Host '  1. Copy gateway-entry.json to the machine running DSH and merge it into gateway/pcs.json (pcs array, alias must be unique).'
+Write-Host '  2. Reload the dsh-pc-gateway plugin (disable then enable, or restart DSH).'
+Write-Host "  3. Call pc_list {probe:true}, then pc_sysinfo {target:$aliasName} to confirm the hostname."
+Write-Host '  Re-print the full entry later (contains the token; avoid shared screens):'
+Write-Host "    Get-Content `"$gatewayEntryPath`" -Raw"
 Write-Host 'See REMOTE-SETUP.md for the exact steps.'
 Write-Host ''
-Write-Host 'Local control examples:' -ForegroundColor Green
+Write-Host 'Local control (optional):' -ForegroundColor Green
 Write-Host "  `"$controlScript`" status"
 Write-Host "  `"$controlScript`" disable shell,screenshot"
 Write-Host "  `"$controlScript`" all-off"

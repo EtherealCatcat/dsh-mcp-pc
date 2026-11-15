@@ -3,6 +3,20 @@
 本项目的控制端接入方式在 0.2.0 起统一为**网关模式**。旧的“一台被控端一个
 `@deepseek-ai/dsh-mcp-client` bundle”方案已移除，不再提供生成、安装或回滚脚本。
 
+## 未发布
+
+### 变更
+
+- `deploy/install.ps1` 支持交互式配置身份：不带 `-Alias` 时询问别名（留空用上次条目里的值，
+  没有则用主机名），新增 `-DisplayName`，同样支持交互与 `DSHPC_ALIAS` / `DSHPC_DISPLAY_NAME`
+  环境变量；输入被重定向或没有终端时自动非交互，新增 `-Unattended` 显式关闭提问。
+- 安装收尾输出改为三段：先说明被控端安装已完成，再给配对文件路径与掩码 token，最后给控制端
+  接入步骤；token 默认只显示前 4 位和后 4 位，`-ShowToken` 打印完整 token，`-PairingCode`
+  打印一行 base64 条目，两者互斥。
+- `gateway-entry.json` 与 `PAIRING.txt` 写入后用 `icacls` 收紧为当前账户独占。
+- `deploy/*.ps1` 改为纯 ASCII：Windows PowerShell 5.1 按 ANSI 解码无 BOM 的脚本，中文引号
+  会变成乱码并直接语法报错；新增守卫测试，防止再次引入非 ASCII 字符。
+
 ## 0.2.2 — 2026-11-15
 
 ### 修复

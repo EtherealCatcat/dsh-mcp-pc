@@ -109,20 +109,28 @@ chmod 600 gateway/pcs.json       # 填入每台机器的 alias / url / token
 安装脚本会检测 Python；不会自动安装 Python。
 
 ```powershell
-# 在项目根目录，普通 PowerShell 即可（防火墙规则/计划任务需要管理员时请用管理员 PowerShell）
+# 不带参数直接运行：脚本会询问别名与显示名（直接回车用默认值，重装时沿用上次条目里的值）
 powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
 ```
 
 常用参数：
 
 ```powershell
-.\deploy\install.ps1 -Alias office
+.\deploy\install.ps1 -Alias office -DisplayName 'Office PC'
 .\deploy\install.ps1 -Port 8765 -PublicHost 100.x.y.z
 .\deploy\install.ps1 -RotateToken          # 重新生成 token（控制端需更新对应条目）
 .\deploy\install.ps1 -NoFirewall           # 不添加防火墙规则（需自行放行 TCP 端口）
 .\deploy\install.ps1 -NoAutostart          # 不注册登录自启
 .\deploy\install.ps1 -InstallDir D:\DSHRemotePC\app -DataDir D:\DSHRemotePC\data
+.\deploy\install.ps1 -Unattended           # 不问任何问题（脚本化/远程执行用）
+.\deploy\install.ps1 -ShowToken            # 结束时打印完整 token（默认只显示前 4 位和后 4 位）
+.\deploy\install.ps1 -PairingCode          # 结束时多打印一行 base64，整行即可转交给控制端
 ```
+
+`alias` 只允许 `A-Z a-z 0-9 _ -`，最长 16 个字符；非法输入会提示重问（最多三次）。
+`displayName` 是控制端显示的名字，默认用主机名。
+输入被重定向或没有交互终端时（例如通过本工具自己的 `pc_run` 调用），脚本自动按非交互处理；
+也可以用 `DSHPC_ALIAS` / `DSHPC_DISPLAY_NAME` 环境变量给出这两个值。
 
 安装脚本会：
 
@@ -133,12 +141,19 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
 5. 启动服务并等待 `/healthz` 通过；
 6. 生成 `gateway-entry.json`（控制端可直接合并的条目）和 `PAIRING.txt`（人读的配对信息）。
 
-安装完成后会打印：
+安装完成后会打印三段：
 
-- MCP 端点（`http://100.x.y.z:8765/mcp`）
-- 机器别名（`alias`）与 Bearer token
-- `gateway-entry.json` 与 `PAIRING.txt` 的路径
-- 本机控制命令
+1. **本机安装完成**：主机名、`alias`、`displayName`、MCP 端点、自启方式、防火墙状态、掩码后的 token
+   （只显示前 4 位和后 4 位）。控制端注册需要完整 token，见下一段。
+2. **配对文件**：`gateway-entry.json` 与 `PAIRING.txt` 的路径。两者都含完整 token，
+   写入后权限被收紧为当前账户独占；合并进控制端后应删除或按凭据保管。
+3. **控制端接入**：把 `gateway-entry.json` 合并进控制端 `gateway/pcs.json`（`pcs` 数组，`alias` 唯一）、
+   重载 `dsh-pc-gateway` 插件、用 `pc_list {probe:true}` 与 `pc_sysinfo {target:<alias>}` 验证；
+   同时给出 `Get-Content "<entry>" -Raw`，以后可以随时重新打印完整条目。
+
+需要当场看到完整 token 时加 `-ShowToken`；需要把整条条目一次性转交（例如贴进另一台机器的脚本）时加
+`-PairingCode`，它会打印一行 base64，解码后就是 `gateway-entry.json` 的全文。两者互斥：会同时出现在屏幕上的
+内容越少越好。
 
 `gateway-entry.json` 形如：
 
@@ -151,7 +166,8 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
 }
 ```
 
-`alias` 默认由主机名生成；建议用 `-Alias` 指定一个短而清晰的名字。控制端合并后请确认 `alias` 唯一。
+`alias` 默认由主机名生成；建议用 `-Alias` 指定一个短而清晰的名字（例如 `office`），
+这样控制端调用时写 `target=office` 最省事。控制端合并后请确认 `alias` 唯一。
 
 ### 本机控制 CLI
 

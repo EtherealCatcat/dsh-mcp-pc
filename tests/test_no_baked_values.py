@@ -115,6 +115,16 @@ class NoBakedValues(unittest.TestCase):
         self.assertNotRegex(install, r"dsh-pc-remote\s+\d+\.\d+\.\d+")
         self.assertNotIn("requestTimeoutMs", install)
 
+    def test_deploy_scripts_are_ascii(self) -> None:
+        # Windows PowerShell 5.1 decodes BOM-less files as ANSI; a single curly
+        # quote or em dash there turns into mojibake and breaks parsing.
+        for path in sorted((ROOT / "deploy").glob("*.ps1")):
+            data = path.read_bytes()
+            if data.startswith(b"\xef\xbb\xbf"):
+                data = data[3:]
+            offenders = [i for i, byte in enumerate(data) if byte > 0x7F]
+            self.assertEqual(offenders, [], f"{path.name} must stay ASCII-only")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

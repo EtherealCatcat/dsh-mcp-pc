@@ -92,10 +92,18 @@ curl http://100.x.y.z:8765/healthz
 
 添加第二台、第三台机器都只需要重复这一步；不需要重新安装网关插件，也不需要重新生成或重新安装控制端插件。
 
+安装脚本结束时不会在屏幕上打印完整 token，只给出前 4 位和后 4 位。拿完整条目的三种方式：
+
+- 直接读取被控端数据目录里的 `gateway-entry.json`（脚本会打印 `Get-Content` 命令，权限已收紧为当前账户）；
+- 安装时加 `-ShowToken`，结束时打印完整 token；
+- 安装时加 `-PairingCode`，结束时打印一行 base64，解码后就是 `gateway-entry.json` 的全文
+  （例如 `base64 -d`，或 `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('...'))`）。
+
 ### alias 与 displayName
 
 - `alias` 是模型在 `target` 参数里使用的名字，越短越不容易写错；建议用 `office`、`lab`、`parallels`
   这类语义名，而不是 `pc1`、`pc2`。
+- 被控端 `install.ps1` 不带参数运行时会询问这两个值；重装时默认沿用上次条目里的值，直接回车即可。
 - `displayName` 只用于展示，可以写中文；`pc_list` 会同时返回两者。
 - 所有被控端的底层工具描述相同，模型只能靠 `target` 区分；重要操作前先 `pc_sysinfo` 核对 `hostname`。
 
