@@ -80,7 +80,8 @@ chmod 600 gateway/pcs.json       # 填入每台机器的 alias / url / token
 - `alias` 是模型在 `target` 里使用的名字，规则 `[A-Za-z0-9_-]{1,16}`，必须唯一；
 - `displayName` 是给人看的名字，会出现在 `pc_list` 里；
 - `url` 指向被控端的 `/mcp`，推荐用 MagicDNS 名称而不是易变的 IP；
-- `requestTimeoutMs` 可省略，默认 120000。
+- `requestTimeoutMs` 可省略，默认 120000（普通工具的 HTTP 超时）。`pc_run` 例外：
+  按本次 `timeout_sec` 放宽到该值 +30 秒、上限 600 秒，避免网关先于被控端超时。
 
 然后在 DSH 中安装网关插件：
 
@@ -315,6 +316,18 @@ python tests\mcp_client.py --url ... --tool get_system_info
 
 网关本身可用 `node --check gateway/index.js` 做语法检查；修改后重载插件，用 `pc_list` 和
 `pc_sysinfo` 验证。
+
+以下三个测试不依赖 Windows，可在 macOS/Linux 上直接跑（CI 或本机改完就验）：
+
+```bash
+python3 tests/test_http_keepalive.py    # P2：401/413/400 早期返回不再破坏 keep-alive
+python3 tests/test_screenshot_store.py  # P3：save() 与 cleanup() 并发不互相删除临时文件
+python3 tests/test_gateway_contract.py  # P1/P5：网关超时覆盖被控端上限；tools.json 快照与 TOOL_DEFS 一致
+node tests/test_gateway_timeout.mjs     # P1 行为：pc_run 的 HTTP 超时随 timeout_sec 放宽并封顶
+```
+
+`test_gateway_contract.py` 失败时说明 `gateway/tools.json` 需要按
+`server/dshpc_tools.TOOL_DEFS` 重新生成（快照只用于两台机器都离线时的 schema 回退）。
 
 ## 变更记录
 

@@ -31,6 +31,17 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
+# A rejected request whose body we never read leaves those bytes in the socket.
+# HTTP/1.1 keep-alive would then parse them as the next request line (which is
+# how a bad token used to turn the following call into `501 Unsupported method`),
+# so every early return either drains the body or closes the connection.
+DRAIN_CHUNK_BYTES = 64 * 1024
+DRAIN_TIMEOUT_SECONDS = 5.0
+# Oversize uploads are drained (and answered with a reusable 413) up to this
+# multiple of max_request_bytes; past it the socket is closed instead, so an
+# unauthenticated caller cannot make the server swallow unbounded data.
+OVERSIZE_DRAIN_FACTOR = 4
+
 
 class RpcError(Exception):
     def __init__(self, code: int, message: str):
@@ -252,6 +263,54 @@ class McpHttpHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    # -- request framing ---------------------------------------------------
+    def _content_length(self) -> int | None:
+        """Content-Length as an int; 0 when absent, None when unusable."""
+        raw = (self.headers.get("Content-Length") or "").strip()
+        if not raw:
+            return 0
+        try:
+            value = int(raw)
+        except ValueError:
+            return None
+        return value if value >= 0 else None
+
+    def _drain_unread_body(self, length: int | None, *, drain_limit: int | None = None) -> bool:
+        """Read and discard a body that will not be parsed.
+
+        Returns True when the connection is still in sync (safe to reuse), False
+        when it must be closed. Bounded in size and in time: a client that
+        announces a huge body, or stalls halfway, cannot pin this thread.
+        """
+        if length is None:
+            self.close_connection = True
+            return False
+        if length == 0:
+            return True
+        limit = self.server.max_request_bytes if drain_limit is None else drain_limit
+        if length > limit:
+            self.close_connection = True
+            return False
+        previous_timeout = self.connection.gettimeout()
+        self.connection.settimeout(DRAIN_TIMEOUT_SECONDS)
+        try:
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, DRAIN_CHUNK_BYTES))
+                if not chunk:
+                    self.close_connection = True
+                    return False
+                remaining -= len(chunk)
+            return True
+        except OSError:
+            self.close_connection = True
+            return False
+        finally:
+            try:
+                self.connection.settimeout(previous_timeout)
+            except OSError:
+                pass
+
     def _send(self, status: int, body: bytes, content_type: str, extra: dict[str, str] | None = None) -> None:
         try:
             self.send_response(status)
@@ -315,25 +374,39 @@ class McpHttpHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
         if path != "/mcp":
-            self._send_empty(404)
+            keep = self._drain_unread_body(self._content_length())
+            self._send_empty(404, None if keep else {"Connection": "close"})
+            return
+        length = self._content_length()
+        if length is None:
+            self.close_connection = True
+            self._send_empty(400, {"Connection": "close"})
+            return
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            self.close_connection = True
+            self._send_empty(411, {"Connection": "close"})
             return
         if not self._authorized():
+            keep = self._drain_unread_body(length)
+            extra = {"WWW-Authenticate": 'Bearer realm="dsh-pc-remote"'}
+            if not keep:
+                extra["Connection"] = "close"
             self._send_json(
                 401,
                 {"jsonrpc": "2.0", "id": None, "error": {"code": -32001, "message": "unauthorized"}},
-                {"WWW-Authenticate": 'Bearer realm="dsh-pc-remote"'},
+                extra,
             )
-            return
-        try:
-            length = int(self.headers.get("Content-Length", "0") or 0)
-        except ValueError:
-            self._send_empty(400)
             return
         if length <= 0:
             self._send_json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": PARSE_ERROR, "message": "empty body"}})
             return
         if length > self.server.max_request_bytes:
-            self._send_empty(413)
+            # Small overshoots are drained so the caller receives a clean 413 on a
+            # reusable connection; anything bigger is dropped and the socket closed.
+            if self._drain_unread_body(length, drain_limit=self.server.max_request_bytes * OVERSIZE_DRAIN_FACTOR):
+                self._send_empty(413)
+            else:
+                self._send_empty(413, {"Connection": "close"})
             return
         body = self.rfile.read(length)
         try:

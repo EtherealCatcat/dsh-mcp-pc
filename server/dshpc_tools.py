@@ -130,6 +130,10 @@ class ScreenshotStore:
     """Recent screenshots, kept only so the controller's user can open a URL."""
 
     _ID_RE = re.compile(r"^[0-9a-f]{32}$")
+    # A save() only keeps its temp file for the duration of one write+replace.
+    # Cleanup therefore treats anything younger than this as "still being
+    # written" instead of deleting it out from under a concurrent save().
+    STALE_TEMP_SECONDS = 300
 
     def __init__(self, directory: Path, *, retention_hours: int = 24, max_files: int = 200):
         self.directory = Path(directory)
@@ -142,9 +146,15 @@ class ScreenshotStore:
     def save(self, data: bytes, extension: str = "png") -> str:
         shot_id = secrets.token_hex(16)
         path = self.directory / f"{shot_id}.{extension}"
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_bytes(data)
-        os.replace(temp, path)
+        # Unique per save: two concurrent saves must never share a temp file, and
+        # cleanup() only reclaims temp files that are already stale.
+        temp = self.directory / f".{shot_id}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            temp.write_bytes(data)
+            os.replace(temp, path)
+        except OSError:
+            temp.unlink(missing_ok=True)
+            raise
         self.cleanup()
         return shot_id
 
@@ -168,7 +178,16 @@ class ScreenshotStore:
                         stat = entry.stat()
                     except OSError:
                         continue
-                    if entry.suffix == ".tmp" or now - stat.st_mtime > self.retention_hours * 3600:
+                    age = now - stat.st_mtime
+                    if entry.suffix.lower() == ".tmp":
+                        # Younger temp files belong to an in-flight save(); deleting
+                        # them would make its os.replace() fail with ENOENT.
+                        if age <= self.STALE_TEMP_SECONDS:
+                            continue
+                        expired = True
+                    else:
+                        expired = age > self.retention_hours * 3600
+                    if expired:
                         try:
                             entry.unlink()
                         except OSError:

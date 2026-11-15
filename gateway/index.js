@@ -9,12 +9,15 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
+import {
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  DEFAULT_STARTUP_TIMEOUT_MS,
+  callTimeoutMs,
+} from './timeout.js'
 
 export const name = 'pc-gateway'
 export const inject = ['tools']
 
-const DEFAULT_STARTUP_TIMEOUT_MS = 3_000
-const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
 
 /** Public tool -> upstream MCP tool. Descriptions are intentionally short; the
  * upstream schema carries the detailed parameter docs. */
@@ -236,7 +239,7 @@ export async function apply(ctx, config = {}) {
             rest.include_image ??= true
             rest.format ??= 'png'
           }
-          return rpc(pc, 'tools/call', { name: spec.remote, arguments: rest }, exec?.signal)
+          return rpc(pc, 'tools/call', { name: spec.remote, arguments: rest }, exec?.signal, callTimeoutMs(spec, rest, pc))
         },
       }))
     }

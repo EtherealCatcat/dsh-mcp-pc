@@ -245,7 +245,7 @@ if (Test-Path -LiteralPath $legacyBundle) {
     Remove-Item -LiteralPath $legacyBundle -Recurse -Force
     Write-Host '  removed legacy bundle/ template from the install directory.'
 }
-[IO.File]::WriteAllText((Join-Path $InstallDir 'VERSION'), "dsh-pc-remote 1.0.0`r`n", (New-Object System.Text.UTF8Encoding($false)))
+[IO.File]::WriteAllText((Join-Path $InstallDir 'VERSION'), "dsh-pc-remote 1.0.1`r`n", (New-Object System.Text.UTF8Encoding($false)))
 [IO.File]::WriteAllText((Join-Path $InstallDir 'python-path.txt'), $pythonExe, (New-Object System.Text.UTF8Encoding($false)))
 
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null

@@ -3,6 +3,28 @@
 本项目的控制端接入方式在 0.2.0 起统一为**网关模式**。旧的“一台被控端一个
 `@deepseek-ai/dsh-mcp-client` bundle”方案已移除，不再提供生成、安装或回滚脚本。
 
+## 0.2.1 — 2026-11-15
+
+### 修复
+
+- 网关按 `pc_run` 的 `timeout_sec` 自动放宽 HTTP 超时（该值 +30 秒，上限 600 秒），
+  不再用固定 120 秒掐断被控端允许跑 600 秒的命令。此前网关先超时、命令仍在被控端
+  继续执行，用户重试就会重复执行同一条命令。
+- 被控端 HTTP 层在 401/413/404/411 等早期返回前读取并丢弃未解析的请求体，超限或
+  无法解析时显式关闭连接。此前未读的请求体会被当成下一条请求行解析，同一 keep-alive
+  连接上先发错 token 再发正常请求会得到 `501 Unsupported method`，大请求体则直接
+  `BrokenPipe`。超过 `max_request_bytes` 4 倍的上传不再读取，直接断开。
+- `ScreenshotStore.save()` 改用每次唯一的临时文件名，`cleanup()` 只回收超过 300 秒的
+  残留 `.tmp`，两者并发时不再出现 `os.replace()` 的 `FileNotFoundError`。
+
+### 新增
+
+- 跨平台回归测试（不需要 Windows）：`tests/test_http_keepalive.py`、
+  `tests/test_screenshot_store.py`、`tests/test_gateway_contract.py`、
+  `tests/test_gateway_timeout.mjs`。最后一个不依赖 Host 直接测超时策略；契约测试同时校验
+  `gateway/tools.json` 快照与 `server/dshpc_tools.TOOL_DEFS` 一致。
+- 超时策略抽到无依赖的 `gateway/timeout.js`（`callTimeoutMs`），便于单独测试。
+
 ## 0.2.0 — 2026-11-15
 
 ### 新增
