@@ -1,11 +1,23 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadMcpClient } from './mcp-client.mjs';
 
-const base =
-  'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules/@modelcontextprotocol/client/dist/index.mjs';
-const { Client, StreamableHTTPClientTransport } = await import('file:///' + base);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const config = JSON.parse(fs.readFileSync('.tmp/server-data/config.json', 'utf8'));
-const url = new URL('http://127.0.0.1:18765/mcp');
+function argValue(name) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+// --config / --url / --port (or DSHPC_CONFIG / DSHPC_URL / DSHPC_PORT) make this
+// file usable against any locally started server, not just .tmp/server-data.
+const configPath =
+  process.env.DSHPC_CONFIG || argValue('--config') || path.join(ROOT, '.tmp', 'server-data', 'config.json');
+const port = process.env.DSHPC_PORT || argValue('--port') || '18765';
+const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+const url = new URL(process.env.DSHPC_URL || argValue('--url') || `http://127.0.0.1:${port}/mcp`);
+const { Client, StreamableHTTPClientTransport } = await loadMcpClient();
 const transport = new StreamableHTTPClientTransport(url, {
   requestInit: { headers: { Authorization: 'Bearer ' + config.token } },
 });

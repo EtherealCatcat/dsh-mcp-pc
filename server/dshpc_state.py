@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+import dshpc_version
+
 try:  # Windows only, but keep the module importable for tests elsewhere.
     import msvcrt
 except Exception:  # pragma: no cover - non-Windows
@@ -69,23 +71,43 @@ FEATURE_ALIASES: dict[str, str] = {
     "keep_awake": "sleep",
 }
 
+# ---------------------------------------------------------------------------
+# Single source of truth for limits.  The same numbers appear in the MCP JSON
+# schemas (``dshpc_tools``), the gateway (``gateway/timeout.js``) and the
+# PowerShell installer, which cannot import this module; tests check that those
+# copies stay equal.  Change a value here first, then run the test suite.
+# ---------------------------------------------------------------------------
+DEFAULT_PORT = dshpc_version.DEFAULT_PORT
+MAX_REQUEST_BYTES = 2 * 1024 * 1024
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUPS = 3
+DEFAULT_TIMEOUT_SEC = 60
+MAX_TIMEOUT_SEC = 600
+MAX_OUTPUT_CHARS = 20_000
+MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+LOG_COMMAND_CHARS = 500
+SCREENSHOT_RETENTION_HOURS = 24
+SCREENSHOT_MAX_FILES = 200
+
 CONFIG_DEFAULTS: dict[str, Any] = {
     "version": 1,
-    "port": 8765,
+    "port": DEFAULT_PORT,
     "bind": "tailscale",  # tailscale | address | all
     "bind_address": "",
     "public_host": "",
     "token": "",
     "log_level": "INFO",
-    "log_max_bytes": 2 * 1024 * 1024,
-    "log_backups": 3,
+    "log_max_bytes": LOG_MAX_BYTES,
+    "log_backups": LOG_BACKUPS,
     "log_commands": True,
+    "log_command_chars": LOG_COMMAND_CHARS,
     "info_gate": True,
-    "max_request_bytes": 2 * 1024 * 1024,
+    "max_request_bytes": MAX_REQUEST_BYTES,
     "shell": {
-        "default_timeout_sec": 60,
-        "max_timeout_sec": 600,
-        "max_output_chars": 20000,
+        "default_timeout_sec": DEFAULT_TIMEOUT_SEC,
+        "max_timeout_sec": MAX_TIMEOUT_SEC,
+        "max_output_chars": MAX_OUTPUT_CHARS,
+        "max_output_bytes": MAX_OUTPUT_BYTES,
         "blocklist": [],
     },
     "screenshot": {
@@ -93,8 +115,8 @@ CONFIG_DEFAULTS: dict[str, Any] = {
         "format": "png",
         "jpeg_quality": 85,
         "include_image": True,
-        "retention_hours": 24,
-        "max_files": 200,
+        "retention_hours": SCREENSHOT_RETENTION_HOURS,
+        "max_files": SCREENSHOT_MAX_FILES,
     },
     "sleep": {
         "keep_display_default": False,
@@ -110,8 +132,12 @@ def default_data_dir() -> Path:
     override = os.environ.get("DSHPC_DATA_DIR", "").strip()
     if override:
         return Path(override).expanduser()
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "DSHRemotePC" / "data"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "DSHRemotePC" / "data"
+    # POSIX: the server is Windows-only, but the module is imported by tests and
+    # by ``dshpc config`` on other platforms.  Do not create ~/AppData there.
+    return Path.home() / ".dshpc"
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -229,10 +255,10 @@ class Config:
     @property
     def port(self) -> int:
         try:
-            port = int(self.data.get("port", 8765))
+            port = int(self.data.get("port", DEFAULT_PORT))
         except (TypeError, ValueError):
-            port = 8765
-        return port if 1 <= port <= 65535 else 8765
+            port = DEFAULT_PORT
+        return port if 1 <= port <= 65535 else DEFAULT_PORT
 
     @property
     def bind(self) -> str:

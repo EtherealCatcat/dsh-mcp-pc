@@ -42,6 +42,14 @@ assert.equal(callTimeoutMs({ remote: 'get_system_info' }, {}, pc), pc.requestTim
 // Non-numeric input falls back to the per-PC default instead of NaN.
 assert.equal(callTimeoutMs(runCommand, { timeout_sec: 'abc' }, pc), pc.requestTimeoutMs)
 
+// The installer no longer writes requestTimeoutMs, so a hand-written entry may
+// omit it entirely; the policy then falls back to the built-in default.
+assert.equal(
+  callTimeoutMs(captureScreen, {}, { alias: 'bare' }),
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  'missing requestTimeoutMs must fall back to DEFAULT_REQUEST_TIMEOUT_MS',
+)
+
 // Exactly the boundary: 600s is still allowed without clamping surprise.
 assert.equal(callTimeoutMs(runCommand, { timeout_sec: 600 }, pc), MAX_COMMAND_TIMEOUT_SEC * 1000 + COMMAND_TIMEOUT_SLACK_MS)
 

@@ -3,6 +3,31 @@
 本项目的控制端接入方式在 0.2.0 起统一为**网关模式**。旧的“一台被控端一个
 `@deepseek-ai/dsh-mcp-client` bundle”方案已移除，不再提供生成、安装或回滚脚本。
 
+## 0.2.2 — 2026-11-15
+
+### 修复
+
+- 去掉仓库里的个人环境值：示例配置与文档改用 `100.x.y.z` 占位地址，`verify_deployed.py`
+  的地址改由被控端 `config.json` 的 `public_host`/`port` 推导，`gateway/README.md` 不再写
+  开发者本机路径。
+- 版本与常量改为单一来源：安装脚本的 `VERSION` 直接读 `server/dshpc_version.py`，不再写死
+  `1.0.1`；`gateway-entry.json` 不再复制网关的 `requestTimeoutMs`；端口、请求体上限、日志
+  轮转、命令超时/输出上限、截图保留数量全部集中在 `server/dshpc_state.py`，MCP schema、
+  安装脚本与网关与之对齐。
+- `tools/list` 的 `timeout_sec.maximum` 现在跟随被控端 `shell.max_timeout_sec`，配置调低上限时
+  不再向控制端承诺一个服务端会拒绝的值。
+
+### 变更
+
+- 新增 `deploy/common.ps1`：安装与卸载共享任务名、Run 键名、防火墙规则前缀、默认安装/数据
+  目录、默认端口与健康检查窗口，卸载不会漏删安装时创建的对象。
+- `mode_serve` / `mode_stdio` 共用 `_build_runtime()`，新增限制只需接一次线。
+- 新增配置项 `shell.max_output_bytes`（默认 4 MiB）与 `log_command_chars`（默认 500）。
+- `tests/*.mjs` 通过 `tests/mcp-client.mjs` 三级探测 DSH 自带的 MCP SDK，`test_mcp.mjs` 支持
+  `--config` / `--url` / `--port`；非 Windows 平台的数据目录回退改为 `~/.dshpc`。
+- 新增 `tests/test_no_baked_values.py`：阻止个人 IP/路径回流，并校验端口、超时上限、安装脚本
+  常量仍与 Python 单一来源一致。
+
 ## 0.2.1 — 2026-11-15
 
 ### 修复

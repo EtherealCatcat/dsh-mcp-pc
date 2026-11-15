@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import dshpc_state
+
 CREATE_NO_WINDOW = 0x08000000
 
 
@@ -110,10 +112,11 @@ def run_command(
     *,
     shell: str = "pwsh",
     cwd: str | None = None,
-    timeout_sec: int = 60,
+    timeout_sec: int = dshpc_state.DEFAULT_TIMEOUT_SEC,
     env: dict[str, str] | None = None,
     stdin: str | None = None,
-    max_output_chars: int = 20000,
+    max_output_chars: int = dshpc_state.MAX_OUTPUT_CHARS,
+    max_output_bytes: int = dshpc_state.MAX_OUTPUT_BYTES,
     blocklist: list[str] | None = None,
 ) -> dict[str, Any]:
     if not command or not str(command).strip():
@@ -135,7 +138,13 @@ def run_command(
         cwd = str(cwd_path)
 
     kind = _resolve_shell(shell)
-    timeout_sec = max(1, min(600, int(timeout_sec or 60)))
+    timeout_sec = max(
+        1,
+        min(
+            dshpc_state.MAX_TIMEOUT_SEC,
+            int(timeout_sec or dshpc_state.DEFAULT_TIMEOUT_SEC),
+        ),
+    )
     child_env = dict(os.environ)
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
     if env:
@@ -179,7 +188,7 @@ def run_command(
         process = subprocess.Popen(args, cwd=cwd, env=child_env, **_popen_kwargs())
         stdout = bytearray()
         stderr = bytearray()
-        cap = 4 * 1024 * 1024
+        cap = max(1024, int(max_output_bytes))
         readers = [
             threading.Thread(target=_read_stream, args=(process.stdout, stdout, cap), daemon=True),
             threading.Thread(target=_read_stream, args=(process.stderr, stderr, cap), daemon=True),

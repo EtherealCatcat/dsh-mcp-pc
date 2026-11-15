@@ -208,7 +208,7 @@ export async function apply(ctx, config = {}) {
           if (args?.probe === true) {
             const rows = await Promise.all(pcs.map(async pc => {
               try {
-                const result = await rpc(pc, 'tools/list', {}, exec?.signal, 3_000)
+                const result = await rpc(pc, 'tools/list', {}, exec?.signal, DEFAULT_STARTUP_TIMEOUT_MS)
                 return { alias: pc.alias, displayName: pc.displayName, url: pc.url, online: true, tools: result?.tools?.length ?? 0 }
               } catch (error) {
                 return { alias: pc.alias, displayName: pc.displayName, url: pc.url, online: false, error: error?.message ?? String(error) }

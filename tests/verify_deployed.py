@@ -11,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mcp_client  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "server"))
+import dshpc_state  # noqa: E402
+
 
 
 def text_of(result: dict) -> str:
@@ -23,16 +26,25 @@ def call(url: str, token: str, name: str, args: dict, request_id: int) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://100.70.184.108:8765/mcp")
     parser.add_argument(
         "--config",
-        default=str(Path.home() / "AppData/Local/DSHRemotePC/data/config.json"),
+        default=str(dshpc_state.default_data_dir() / "config.json"),
+        help="被控端 config.json（默认取自 DSHPC_DATA_DIR 或平台默认数据目录）",
+    )
+    parser.add_argument(
+        "--url",
+        default=None,
+        help="MCP 地址；省略时用 config.json 里的 public_host（缺失则 127.0.0.1）和 port 拼出来",
     )
     parser.add_argument("--shot", default=str(ROOT / ".tmp" / "deployed-shot.png"))
     args = parser.parse_args()
 
     config = json.loads(Path(args.config).read_text(encoding="utf-8-sig"))
     token = config["token"]
+    if not args.url:
+        host = str(config.get("public_host") or "127.0.0.1")
+        port = int(config.get("port") or dshpc_state.DEFAULT_PORT)
+        args.url = f"http://{host}:{port}/mcp"
 
     init = mcp_client.rpc(
         args.url,

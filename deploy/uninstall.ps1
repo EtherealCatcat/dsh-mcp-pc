@@ -20,18 +20,22 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $InstallDir = (Join-Path $env:LOCALAPPDATA 'DSHRemotePC\app'),
-    [string] $DataDir = (Join-Path $env:LOCALAPPDATA 'DSHRemotePC\data'),
+    [string] $InstallDir = '',
+    [string] $DataDir = '',
     [switch] $Purge
 )
 
 $ErrorActionPreference = 'Stop'
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptRoot 'common.ps1')
+if (-not $InstallDir) { $InstallDir = $DshpcDefaultInstallDir }
+if (-not $DataDir) { $DataDir = $DshpcDefaultDataDir }
 Set-Location -LiteralPath $env:SystemDrive
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $DataDir = [IO.Path]::GetFullPath($DataDir)
-$taskName = 'DSHRemotePC'
-$runValueName = 'DSHRemotePC'
-$firewallPrefix = 'DSH Remote PC'
+$taskName = $DshpcTaskName
+$runValueName = $DshpcRunValueName
+$firewallPrefix = $DshpcFirewallPrefix
 
 function Write-Step([string] $Message) {
     Write-Host ''

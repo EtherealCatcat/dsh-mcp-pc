@@ -29,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "server"))
 
+import dshpc_state  # noqa: E402
 import dshpc_tools  # noqa: E402
 
 GATEWAY = ROOT / "gateway"
@@ -66,13 +67,10 @@ class GatewayTimeoutTests(unittest.TestCase):
         return int(match.group(1).replace("_", ""))
 
     def test_command_timeout_covers_receiver_limit(self) -> None:
-        receiver_limit = re.search(r'max_timeout_sec",\s*(\d+)', self.tools_source)
-        self.assertIsNotNone(receiver_limit, "server/dshpc_tools.py 中找不到 max_timeout_sec 默认值")
-        receiver_seconds = int(receiver_limit.group(1))
-
         command_cap = self._js_number("MAX_COMMAND_TIMEOUT_SEC")
         slack_ms = self._js_number("COMMAND_TIMEOUT_SLACK_MS")
-        self.assertEqual(command_cap, receiver_seconds)
+        self.assertEqual(command_cap, dshpc_state.MAX_TIMEOUT_SEC)
+        self.assertEqual(command_cap, dshpc_state.CONFIG_DEFAULTS["shell"]["max_timeout_sec"])
         self.assertGreater(slack_ms, 0)
 
     def test_run_command_uses_the_adapted_timeout(self) -> None:
@@ -82,9 +80,51 @@ class GatewayTimeoutTests(unittest.TestCase):
         self.assertIn("'tools/call'", self.index_source)
 
     def test_receiver_clamps_to_the_same_limit(self) -> None:
-        clamp = re.search(r'min\((\d+), int\(shell_cfg\.get\("max_timeout_sec"', self.tools_source)
-        self.assertIsNotNone(clamp, "server/dshpc_tools.py 中找不到 timeout 上限的 clamp")
-        self.assertEqual(int(clamp.group(1)), self._js_number("MAX_COMMAND_TIMEOUT_SEC"))
+        self.assertIn("min(dshpc_state.MAX_TIMEOUT_SEC", self.tools_source)
+        schema = dshpc_tools.TOOL_DEFS[1]["inputSchema"]["properties"]["timeout_sec"]
+        self.assertEqual(schema["maximum"], self._js_number("MAX_COMMAND_TIMEOUT_SEC"))
+
+
+class ToolSchemaTests(unittest.TestCase):
+    """tools/list narrows the timeout bound to this machine's config."""
+
+    def _tools(self, shell: dict) -> dshpc_tools.Tools:
+        import logging
+
+        class Config:
+            data = {"info_gate": False, "log_command_chars": dshpc_state.LOG_COMMAND_CHARS}
+
+            def __init__(self):
+                self.shell = shell
+
+        return dshpc_tools.Tools(
+            config=Config(),
+            state=None,
+            gate=None,
+            sleep=None,
+            store=None,
+            url_base_provider=lambda: "",
+            logger=logging.getLogger("schema-test"),
+            started_at=0.0,
+        )
+
+    def test_default_cap_matches_constant(self) -> None:
+        prop = self._tools(dict(dshpc_state.CONFIG_DEFAULTS["shell"])).list_tools()[1][
+            "inputSchema"
+        ]["properties"]["timeout_sec"]
+        self.assertEqual(prop["maximum"], dshpc_state.MAX_TIMEOUT_SEC)
+        self.assertIn(f"默认 {dshpc_state.DEFAULT_TIMEOUT_SEC}", prop["description"])
+
+    def test_lower_configured_cap_is_advertised(self) -> None:
+        shell = dict(dshpc_state.CONFIG_DEFAULTS["shell"], max_timeout_sec=120, default_timeout_sec=30)
+        prop = self._tools(shell).list_tools()[1]["inputSchema"]["properties"]["timeout_sec"]
+        self.assertEqual(prop["maximum"], 120)
+        self.assertIn("默认 30", prop["description"])
+
+    def test_list_tools_does_not_mutate_the_shared_defs(self) -> None:
+        shell = dict(dshpc_state.CONFIG_DEFAULTS["shell"], max_timeout_sec=120)
+        self._tools(shell).list_tools()
+        self.assertEqual(dshpc_tools.TOOL_DEFS[1]["inputSchema"]["properties"]["timeout_sec"]["maximum"], dshpc_state.MAX_TIMEOUT_SEC)
 
 
 if __name__ == "__main__":

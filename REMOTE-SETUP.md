@@ -17,13 +17,16 @@
   "alias": "office",
   "displayName": "OFFICE-PC",
   "url": "http://100.x.y.z:8765/mcp",
-  "token": "...",
-  "requestTimeoutMs": 120000
+  "token": "..."
 }
 ```
 
 `requestTimeoutMs` 是普通工具的 HTTP 超时；`pc_run` 会按 `timeout_sec`
 自动放宽（+30 秒，上限 600 秒），所以长时间命令不会在网关侧先超时。
+
+安装脚本写入的 `VERSION` 取自 `server/dshpc_version.py`，端口默认值取自
+`deploy/common.ps1`（`-Port` 可覆盖）；安装与卸载共用同一个 `common.ps1`，任务名、
+Run 键和防火墙规则名前缀只定义一次。
 
 本文件中的 `<...>` 都是占位符，以实际生成的文件为准。
 
@@ -71,13 +74,13 @@ curl http://100.x.y.z:8765/healthz
        {
          "alias": "office",
          "displayName": "办公室 PC",
-         "url": "http://100.70.184.108:8765/mcp",
+         "url": "http://100.x.y.z:8765/mcp",
          "token": "..."
        },
        {
          "alias": "parallels",
          "displayName": "Parallels 虚拟机",
-         "url": "http://100.116.55.117:8765/mcp",
+         "url": "http://100.a.b.c:8765/mcp",
          "token": "..."
        }
      ]

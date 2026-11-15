@@ -30,7 +30,8 @@ DSH Remote PC 把一台真实 Windows 电脑的用户级控制权暴露给 Tails
 8. **进程与事务**：命令执行有超时和进程树终止；状态文件原子写入并跨进程加锁；单实例锁防止端口被第二个
    实例接管；HTTP 监听禁用 `SO_REUSEADDR`，降低本机端口劫持风险。
 9. **最小权限**：服务以登录用户身份运行，不请求管理员权限；UAC 安全桌面与提权窗口不可操作。
-10. **审计日志**：记录工具调用、命令（截断 500 字符）、截图尺寸与锁屏状态；不记录截图内容。
+10. **审计日志**：记录工具调用、命令（截断 `log_command_chars`，默认 500 字符）、截图尺寸与锁屏状态；
+    不记录截图内容（`log_commands=false` 可关闭命令记录）。
     可用 `config.json` 的 `log_commands: false` 关闭命令记录。
 
 ## 建议的 Tailscale 配置
@@ -90,7 +91,7 @@ DSH Remote PC 把一台真实 Windows 电脑的用户级控制权暴露给 Tails
 | 配置与 token | `<数据目录>\config.json` | 直到卸载（`-Purge` 删除） |
 | 功能开关 | `<数据目录>\state.json` | 同上 |
 | 日志（含命令） | `<数据目录>\logs\server.log` | 按大小轮转（默认 2 MB × 3） |
-| 截图 | `<数据目录>\screenshots\*.png` | 24 小时 / 最多 200 张 |
+| 截图 | `<数据目录>\screenshots\*.png` | 默认 24 小时 / 最多 200 张（`screenshot.retention_hours` / `max_files`） |
 
 数据目录默认在 `%LOCALAPPDATA%\DSHRemotePC\data`，受用户 profile ACL 保护。若改到 `C:\ProgramData`
 等共享位置，请自行收紧 ACL。

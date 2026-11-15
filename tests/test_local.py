@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT / "server"))
 
 import dshpc_exec  # noqa: E402
 import dshpc_info  # noqa: E402
+import dshpc_state  # noqa: E402
 import dshpc_tools  # noqa: E402
 import dshpc_win  # noqa: E402
 
@@ -93,7 +94,7 @@ def main():
         gate=gate,
         sleep=sleep,
         store=store,
-        url_base_provider=lambda: "http://100.70.184.108:8765",
+        url_base_provider=lambda: f"http://127.0.0.1:{dshpc_state.DEFAULT_PORT}",
         logger=logger,
         started_at=time.time(),
     )

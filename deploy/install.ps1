@@ -43,9 +43,9 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $InstallDir = (Join-Path $env:LOCALAPPDATA 'DSHRemotePC\app'),
-    [string] $DataDir = (Join-Path $env:LOCALAPPDATA 'DSHRemotePC\data'),
-    [int] $Port = 8765,
+    [string] $InstallDir = '',
+    [string] $DataDir = '',
+    [int] $Port = 0,
     [ValidateSet('tailscale', 'address', 'all')]
     [string] $Bind = 'tailscale',
     [string] $BindAddress = '',
@@ -61,12 +61,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptRoot 'common.ps1')
 $sourceRoot = Split-Path -Parent $scriptRoot
+if (-not $InstallDir) { $InstallDir = $DshpcDefaultInstallDir }
+if (-not $DataDir) { $DataDir = $DshpcDefaultDataDir }
+if (-not $Port -or $Port -le 0) { $Port = $DshpcDefaultPort }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $DataDir = [IO.Path]::GetFullPath($DataDir)
-$taskName = 'DSHRemotePC'
-$runValueName = 'DSHRemotePC'
-$firewallPrefix = 'DSH Remote PC'
+$taskName = $DshpcTaskName
+$runValueName = $DshpcRunValueName
+$firewallPrefix = $DshpcFirewallPrefix
 
 function Write-Step([string] $Message) {
     Write-Host ''
@@ -245,7 +249,10 @@ if (Test-Path -LiteralPath $legacyBundle) {
     Remove-Item -LiteralPath $legacyBundle -Recurse -Force
     Write-Host '  removed legacy bundle/ template from the install directory.'
 }
-[IO.File]::WriteAllText((Join-Path $InstallDir 'VERSION'), "dsh-pc-remote 1.0.1`r`n", (New-Object System.Text.UTF8Encoding($false)))
+$serverVersion = (& $pythonExe -c "import sys; sys.path.insert(0, r'$($InstallDir)\server'); import dshpc_version; print(dshpc_version.__version__)" 2>$null | Select-Object -First 1)
+if (-not $serverVersion) { throw 'Could not read the version from server\dshpc_version.py.' }
+$serverVersion = "dsh-pc-remote $($serverVersion.Trim())"
+[IO.File]::WriteAllText((Join-Path $InstallDir 'VERSION'), $serverVersion + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
 [IO.File]::WriteAllText((Join-Path $InstallDir 'python-path.txt'), $pythonExe, (New-Object System.Text.UTF8Encoding($false)))
 
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
@@ -294,8 +301,9 @@ if (-not $NoStart) {
         Start-Process -FilePath $pythonw -ArgumentList $startArgs -WindowStyle Hidden | Out-Null
     }
     $healthy = $false
-    for ($attempt = 0; $attempt -lt 40; $attempt++) {
-        Start-Sleep -Milliseconds 250
+    $attempts = [Math]::Max(1, [int]($DshpcHealthTimeoutSec * 1000 / $DshpcHealthPollMs))
+    for ($attempt = 0; $attempt -lt $attempts; $attempt++) {
+        Start-Sleep -Milliseconds $DshpcHealthPollMs
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/healthz" -TimeoutSec 1
             if ($response.StatusCode -eq 200) { $healthy = $true; break }
@@ -307,7 +315,7 @@ if (-not $NoStart) {
             Write-Host '  last log lines:' -ForegroundColor Yellow
             Get-Content -LiteralPath $log -Tail 15 -Encoding UTF8 | ForEach-Object { Write-Host "    $_" }
         }
-        throw 'The server did not become healthy within 10 seconds.'
+        throw "The server did not become healthy within $DshpcHealthTimeoutSec seconds."
     }
     Write-Host "  healthy on http://127.0.0.1:$Port/healthz"
 }
@@ -320,7 +328,6 @@ $gatewayEntry = [ordered]@{
     displayName = $hostname
     url = [string]$pairing.mcp_url
     token = [string]$pairing.token
-    requestTimeoutMs = 120000
 }
 $gatewayEntryJson = $gatewayEntry | ConvertTo-Json -Depth 4
 [IO.File]::WriteAllText($gatewayEntryPath, $gatewayEntryJson + "`r`n", $utf8)

@@ -31,5 +31,5 @@ export function callTimeoutMs(spec, args, pc) {
       return Math.ceil(bounded * 1000) + COMMAND_TIMEOUT_SLACK_MS
     }
   }
-  return pc.requestTimeoutMs
+  return Number.isFinite(pc?.requestTimeoutMs) ? pc.requestTimeoutMs : DEFAULT_REQUEST_TIMEOUT_MS
 }

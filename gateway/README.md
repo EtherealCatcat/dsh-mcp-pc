@@ -40,9 +40,8 @@ DSH Host
     {
       "alias": "office",                 // 工具里的 target；[A-Za-z0-9_-]{1,16}
       "displayName": "办公室 PC",         // 只用于展示
-      "url": "http://100.70.184.108:8765/mcp",
-      "token": "REPLACE_WITH_TOKEN",
-      "requestTimeoutMs": 120000          // 可选，默认 120000；见下方说明
+      "url": "http://100.x.y.z:8765/mcp",
+      "token": "REPLACE_WITH_TOKEN"
     }
   ]
 }
@@ -52,7 +51,8 @@ DSH Host
 - `token` 也可以写成 `"${env:DSH_PC_OFFICE_TOKEN}"`，由 Host 进程的环境变量提供；
   变量缺失时插件会直接报错，而不是带着空 token 启动。
 - `url` 推荐使用 MagicDNS 名称，避免 IP 变化后反复修改。
-- `requestTimeoutMs` 是普通工具的单次 HTTP 超时（默认 120 秒）。`pc_run` 例外：
+- `requestTimeoutMs`（可选，默认 120 秒）是普通工具的单次 HTTP 超时；安装脚本生成
+  `gateway-entry.json` 时不再写这一项，省略就走默认值。`pc_run` 例外：
   它按本次调用的 `timeout_sec` 自动放宽到该值 +30 秒（上限 600 秒，与被控端
   `max_timeout_sec` 一致）。否则一条跑 3 分钟的命令会在网关侧先超时，而命令仍
   在被控端继续执行——重试就会重复执行同一件事。
@@ -69,7 +69,7 @@ chmod 600 gateway/pcs.json
 # 编辑 alias / displayName / url / token
 
 # 2. 安装（DSH 内让助手调用 plugin_manager，或插件页“添加插件”选择 gateway/）
-#    install_bundle target=/Users/EtherealCat/dsh-mcp-pc/gateway
+#    install_bundle target=<本仓库检出目录>/gateway
 ```
 
 安装后插件列表里会出现一张 **远程电脑** 卡片；工具名是 `pc_*`，用 `target` 选择机器。

@@ -63,14 +63,13 @@ chmod 600 gateway/pcs.json       # 填入每台机器的 alias / url / token
     {
       "alias": "office",
       "displayName": "办公室 PC",
-      "url": "http://100.70.184.108:8765/mcp",
-      "token": "REPLACE_WITH_THE_BEARER_TOKEN",
-      "requestTimeoutMs": 120000
+      "url": "http://100.x.y.z:8765/mcp",
+      "token": "REPLACE_WITH_THE_BEARER_TOKEN"
     },
     {
       "alias": "parallels",
       "displayName": "Parallels 虚拟机",
-      "url": "http://100.116.55.117:8765/mcp",
+      "url": "http://100.a.b.c:8765/mcp",
       "token": "REPLACE_WITH_THE_BEARER_TOKEN"
     }
   ]
@@ -148,8 +147,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
   "alias": "office",
   "displayName": "OFFICE-PC",
   "url": "http://100.x.y.z:8765/mcp",
-  "token": "...",
-  "requestTimeoutMs": 120000
+  "token": "..."
 }
 ```
 
@@ -206,7 +204,7 @@ dshpc url | token | logs --tail 50 | check
 4. **截图**：不包含鼠标指针；DRM/受保护内容可能黑屏；锁屏时可能黑屏。多显示器按物理像素拼接，缩放
    （125%/150%）已做 DPI 感知处理。
 5. **图像查看**：控制端模型必须支持图像输入才能直接“看到”截图；否则 DSH 会显示诊断文本。工具同时返回
-   一个不可猜测的 URL（默认 24 小时有效），控制端用户可在浏览器打开。
+   一个不可猜测的 URL（默认 24 小时有效，见 `screenshot.retention_hours`），控制端用户可在浏览器打开。
 6. **需要 Tailscale 在线**：机器睡眠/断网/Tailscale 退出后连接中断；IP 变化后更新 `pcs.json` 里对应
    `url`（推荐用 `-PublicHost` 填 MagicDNS 名称）并重载网关，不需要重新安装插件。
 7. **单交互会话**：服务运行在安装它的用户会话中；RDP 断开/切换用户可能锁屏，从而限制输入与截图。
@@ -223,14 +221,34 @@ dshpc url | token | logs --tail 50 | check
   不会监听 LAN/Wi-Fi 地址。
 - 所有 `/mcp` 请求需要 `Authorization: Bearer <token>`；token 由 `secrets.token_urlsafe(32)` 生成。
 - 防火墙规则（管理员安装时）把入站限制在 `100.64.0.0/10`。
-- 截图 URL 使用 128 位随机文件名，不含 token；只保留 24 小时/最多 200 张。
+- 截图 URL 使用 128 位随机文件名，不含 token；默认保留 24 小时/最多 200 张
+  （`screenshot.retention_hours` / `screenshot.max_files`）。
 - 安装目录与数据目录在用户 profile 下，其他本机用户无法读取；服务以普通用户权限运行。
 - 控制端的 `gateway/pcs.json` 含全部 token，应设为 `0600`（Windows 上用 ACL 收紧），且不要提交到仓库；
   本项目已把 `gateway/pcs.json` 加入 `.gitignore`。
-- 审计日志在 `<数据目录>\logs\server.log`，默认记录工具名与命令（截断 500 字符），不记录截图内容。
-  如不希望记录命令，把 `config.json` 的 `log_commands` 设为 `false`。
+- 审计日志在 `<数据目录>\logs\server.log`，默认记录工具名与命令（截断 `log_command_chars`，默认 500 字符），
+  不记录截图内容。如不希望记录命令，把 `config.json` 的 `log_commands` 设为 `false`。
 
 详见 [SECURITY.md](SECURITY.md)。
+
+## 可调限制（`config.json`）
+
+被控端的所有限制都有默认值，可以在 `<数据目录>\config.json` 里覆盖（改完重启服务生效）。
+默认值只在 `server/dshpc_state.py` 定义一次；`tools/list` 的 schema、安装脚本和网关从这里对齐。
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `max_request_bytes` | 2097152 | 单个 `/mcp` 请求体上限 |
+| `log_max_bytes` / `log_backups` | 2097152 / 3 | 日志轮转大小与份数 |
+| `log_command_chars` | 500 | 日志中命令的截断长度（`log_commands=false` 时完全不记） |
+| `shell.default_timeout_sec` | 60 | `run_command` 的默认超时 |
+| `shell.max_timeout_sec` | 600 | 超时上限；`tools/list` 里 `timeout_sec.maximum` 跟随此值 |
+| `shell.max_output_chars` | 20000 | 返回给控制端的 stdout/stderr 截断长度 |
+| `shell.max_output_bytes` | 4194304 | 单条输出流的捕获上限，超出部分丢弃 |
+| `screenshot.retention_hours` / `max_files` | 24 / 200 | 截图保留时长与数量 |
+| `screenshot.max_width` / `format` / `jpeg_quality` | 0 / png / 85 | 截图编码 |
+
+控制端 `gateway/pcs.json` 另支持 `requestTimeoutMs`（默认 120000）与 `startupTimeoutMs`（默认 3000）。
 
 ## 可移植性 / 迁移到新电脑
 
@@ -292,7 +310,7 @@ dsh-mcp-pc/
 │  ├─ pcs.json            机器清单（含 token，已 gitignore）
 │  ├─ tools.json          离线工具 schema 快照
 │  └─ README.md           网关配置与排障
-├─ deploy/                install.ps1 / uninstall.ps1
+├─ deploy/                install.ps1 / uninstall.ps1 / common.ps1（共享常量）
 ├─ tests/                 本地能力与 MCP 端到端测试
 ├─ README.md
 ├─ REMOTE-SETUP.md
@@ -312,17 +330,21 @@ python tests\mcp_client.py --url ... --tool get_system_info
 ```
 
 `tests/test_mcp.mjs` 使用 DSH 自带的 `@modelcontextprotocol/client`（与 DSH 实际使用的版本相同）做端到端
-验证：initialize、tools/list、首次调用门禁、功能开关、截图 URL 下载、睡眠开关等。
+验证：initialize、tools/list、首次调用门禁、功能开关、截图 URL 下载、睡眠开关等。SDK 位置由
+`tests/mcp-client.mjs` 按 `DSH_MCP_CLIENT` → `~/.dsh/profiles/*/node_modules` → 平台默认安装目录
+顺序探测；配置文件与地址可用 `--config` / `--url` / `--port`（或 `DSHPC_CONFIG` / `DSHPC_URL` /
+`DSHPC_PORT`）指定，默认仍是 `.tmp/server-data/config.json` + 127.0.0.1:18765。
 
 网关本身可用 `node --check gateway/index.js` 做语法检查；修改后重载插件，用 `pc_list` 和
 `pc_sysinfo` 验证。
 
-以下三个测试不依赖 Windows，可在 macOS/Linux 上直接跑（CI 或本机改完就验）：
+以下测试不依赖 Windows，可在 macOS/Linux 上直接跑（CI 或本机改完就验）：
 
 ```bash
 python3 tests/test_http_keepalive.py    # P2：401/413/400 早期返回不再破坏 keep-alive
 python3 tests/test_screenshot_store.py  # P3：save() 与 cleanup() 并发不互相删除临时文件
 python3 tests/test_gateway_contract.py  # P1/P5：网关超时覆盖被控端上限；tools.json 快照与 TOOL_DEFS 一致
+python3 tests/test_no_baked_values.py   # 仓库里不得出现个人 IP/路径；重复常量必须与单一来源一致
 node tests/test_gateway_timeout.mjs     # P1 行为：pc_run 的 HTTP 超时随 timeout_sec 放宽并封顶
 ```
 

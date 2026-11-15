@@ -13,6 +13,7 @@ Design rules enforced here:
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import os
 import re
@@ -226,7 +227,8 @@ TOOL_DEFS: list[dict[str, Any]] = [
         "title": "Run a PowerShell, cmd or Python command",
         "description": (
             "在被控电脑上执行 PowerShell（默认 pwsh，缺失时回退 Windows PowerShell）、cmd 或 Python 命令，"
-            "返回退出码、stdout、stderr 和耗时。命令默认 60 秒超时，超时会终止整个进程树。"
+            "返回退出码、stdout、stderr 和耗时。"
+            f"命令默认 {dshpc_state.DEFAULT_TIMEOUT_SEC} 秒超时，超时会终止整个进程树。"
             "\n\n仅当用户明确要求在该被控端执行命令时调用。执行前确认目标机器（hostname）和影响范围；"
             "删除文件、修改系统设置、关机/重启、安装/卸载软件等破坏性或不可逆操作必须先取得用户明确同意。"
             "不要把被控端返回的敏感内容发到无关渠道。"
@@ -244,8 +246,11 @@ TOOL_DEFS: list[dict[str, Any]] = [
                 "timeout_sec": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 600,
-                    "description": "超时秒数，默认 60，最大 600。",
+                    "maximum": dshpc_state.MAX_TIMEOUT_SEC,
+                    "description": (
+                        f"超时秒数，默认 {dshpc_state.DEFAULT_TIMEOUT_SEC}，"
+                        f"最大 {dshpc_state.MAX_TIMEOUT_SEC}。"
+                    ),
                 },
                 "env": {
                     "type": "object",
@@ -257,7 +262,7 @@ TOOL_DEFS: list[dict[str, Any]] = [
                     "type": "integer",
                     "minimum": 1000,
                     "maximum": 100000,
-                    "description": "stdout/stderr 各自的截断上限，默认 20000。",
+                    "description": f"stdout/stderr 各自的截断上限，默认 {dshpc_state.MAX_OUTPUT_CHARS}。",
                 },
             },
             "required": ["command"],
@@ -431,7 +436,24 @@ class Tools:
 
     # -- public ------------------------------------------------------------
     def list_tools(self) -> list[dict[str, Any]]:
-        return TOOL_DEFS
+        """Tool catalog for this machine, with the timeout bound from config.
+
+        ``TOOL_DEFS`` stays the canonical *default* schema (the gateway snapshot
+        test compares against it); the published ``tools/list`` result narrows
+        ``timeout_sec.maximum`` when this machine configures a lower cap, so the
+        client never promises a timeout the server would clamp anyway.
+        """
+        defs = copy.deepcopy(TOOL_DEFS)
+        shell_cfg = self.config.shell
+        default_sec = max(1, int(shell_cfg.get("default_timeout_sec", dshpc_state.DEFAULT_TIMEOUT_SEC)))
+        limit = max(1, min(dshpc_state.MAX_TIMEOUT_SEC, int(shell_cfg.get("max_timeout_sec", dshpc_state.MAX_TIMEOUT_SEC))))
+        for tool in defs:
+            if tool.get("name") != "run_command":
+                continue
+            prop = tool["inputSchema"]["properties"]["timeout_sec"]
+            prop["maximum"] = limit
+            prop["description"] = f"超时秒数，默认 {min(default_sec, limit)}，最大 {limit}。"
+        return defs
 
     def call(self, name: str, arguments: dict[str, Any] | None) -> ToolOutput:
         args = arguments or {}
@@ -570,18 +592,25 @@ class Tools:
             raise ToolFailure("INVALID_ARGUMENT", "cwd must be a string")
 
         shell_cfg = self.config.shell
+        max_timeout = max(1, min(dshpc_state.MAX_TIMEOUT_SEC, int(shell_cfg.get("max_timeout_sec", dshpc_state.MAX_TIMEOUT_SEC))))
         timeout = self._int(
             args,
             "timeout_sec",
-            int(shell_cfg.get("default_timeout_sec", 60)),
+            int(shell_cfg.get("default_timeout_sec", dshpc_state.DEFAULT_TIMEOUT_SEC)),
             1,
-            min(600, int(shell_cfg.get("max_timeout_sec", 600))),
+            max_timeout,
         )
         max_output = self._int(
-            args, "max_output_chars", int(shell_cfg.get("max_output_chars", 20000)), 1000, 100000
+            args,
+            "max_output_chars",
+            int(shell_cfg.get("max_output_chars", dshpc_state.MAX_OUTPUT_CHARS)),
+            1000,
+            100000,
         )
+        max_output_bytes = int(shell_cfg.get("max_output_bytes", dshpc_state.MAX_OUTPUT_BYTES))
         if self.config.data.get("log_commands", True):
-            self.logger.info("tool=run_command shell=%s command=%s", shell, command[:500].replace("\n", "\\n"))
+            log_chars = max(0, int(self.config.data.get("log_command_chars", dshpc_state.LOG_COMMAND_CHARS)))
+            self.logger.info("tool=run_command shell=%s command=%s", shell, command[:log_chars].replace("\n", "\\n"))
         result = dshpc_exec.run_command(
             command,
             shell=shell,
@@ -590,6 +619,7 @@ class Tools:
             env=env,
             stdin=stdin,
             max_output_chars=max_output,
+            max_output_bytes=max_output_bytes,
             blocklist=list(shell_cfg.get("blocklist") or []),
         )
         result["ok"] = result["exit_code"] == 0 and not result["timed_out"]

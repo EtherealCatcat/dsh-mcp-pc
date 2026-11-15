@@ -1,14 +1,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { loadMcpClient } from './mcp-client.mjs';
 
-const clientPackage =
-  'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules/@modelcontextprotocol/client/dist/index.mjs';
-const { Client, StreamableHTTPClientTransport } = await import('file:///' + clientPackage);
+const { Client, StreamableHTTPClientTransport } = await loadMcpClient();
 
-const configPath =
-  process.env.DSHPC_CONFIG ||
-  path.join(os.homedir(), 'AppData', 'Local', 'DSHRemotePC', 'data', 'config.json');
+const dataDir =
+  process.env.DSHPC_DATA_DIR ||
+  (process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'DSHRemotePC', 'data')) ||
+  path.join(os.homedir(), '.dshpc');
+const configPath = process.env.DSHPC_CONFIG || path.join(dataDir, 'config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 const url = new URL(process.env.DSHPC_URL || 'http://127.0.0.1:8765/mcp');
 

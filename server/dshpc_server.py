@@ -72,8 +72,8 @@ def setup_logging(config: dshpc_state.Config, *, console: bool = False) -> None:
     formatter = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S")
     file_handler = logging.handlers.RotatingFileHandler(
         log_dir / "server.log",
-        maxBytes=int(config.data.get("log_max_bytes", 2 * 1024 * 1024)),
-        backupCount=int(config.data.get("log_backups", 3)),
+        maxBytes=int(config.data.get("log_max_bytes", dshpc_state.LOG_MAX_BYTES)),
+        backupCount=int(config.data.get("log_backups", dshpc_state.LOG_BACKUPS)),
         encoding="utf-8",
     )
     file_handler.setFormatter(formatter)
@@ -207,7 +207,9 @@ class ListenerSet:
                 token=self.config.token,
                 logger=logger,
                 store=self.store,
-                max_request_bytes=int(self.config.data.get("max_request_bytes", 2 * 1024 * 1024)),
+                max_request_bytes=int(
+                    self.config.data.get("max_request_bytes", dshpc_state.MAX_REQUEST_BYTES)
+                ),
             )
         except OSError as error:
             message = f"cannot bind http://{host}:{self.port} : {error}"
@@ -449,23 +451,30 @@ def mode_check(args: argparse.Namespace) -> int:
     return 0
 
 
-def mode_stdio(args: argparse.Namespace) -> int:
-    data_dir, config_path = _resolve_paths(args)
-    config = dshpc_state.Config.load_or_create(config_path)
-    config.data_dir = data_dir
-    setup_logging(config, console=True)
+def _build_runtime(
+    config: dshpc_state.Config,
+    *,
+    sleep: dshpc_win.SleepBlocker,
+    url_base_provider: Any,
+) -> tuple[dshpc_state.StateStore, dshpc_tools.InfoGate, dshpc_tools.ScreenshotStore, dshpc_mcp.McpProtocol]:
+    """Assemble everything both transports need.
+
+    ``mode_serve`` and ``mode_stdio`` used to duplicate this block; keeping it
+    here means a new limit or store option is wired exactly once.
+    """
+    data_dir = Path(config.data_dir)
     state = dshpc_state.StateStore(
         data_dir / "state.json",
         remote_control=True,
         keep_display=bool(config.sleep.get("keep_display_default", False)),
     )
     gate = dshpc_tools.InfoGate()
-    sleep = dshpc_win.SleepBlocker()
-    sleep.start()
     store = dshpc_tools.ScreenshotStore(
         data_dir / "screenshots",
-        retention_hours=int(config.screenshot.get("retention_hours", 24)),
-        max_files=int(config.screenshot.get("max_files", 200)),
+        retention_hours=int(
+            config.screenshot.get("retention_hours", dshpc_state.SCREENSHOT_RETENTION_HOURS)
+        ),
+        max_files=int(config.screenshot.get("max_files", dshpc_state.SCREENSHOT_MAX_FILES)),
     )
     instructions = dshpc_mcp.build_instructions(
         hostname=socket.gethostname(), port=config.port, version=dshpc_version.__version__
@@ -476,12 +485,23 @@ def mode_stdio(args: argparse.Namespace) -> int:
         gate=gate,
         sleep=sleep,
         store=store,
-        url_base_provider=lambda: "",
+        url_base_provider=url_base_provider,
         logger=logger,
         started_at=STARTED_AT,
     )
     protocol = dshpc_mcp.McpProtocol(tools=tools, instructions=instructions, logger=logger)
+    return state, gate, store, protocol
+
+
+def mode_stdio(args: argparse.Namespace) -> int:
+    data_dir, config_path = _resolve_paths(args)
+    config = dshpc_state.Config.load_or_create(config_path)
+    config.data_dir = data_dir
+    setup_logging(config, console=True)
+    sleep = dshpc_win.SleepBlocker()
+    sleep.start()
     try:
+        _, _, _, protocol = _build_runtime(config, sleep=sleep, url_base_provider=lambda: "")
         return dshpc_mcp.StdioProtocol(protocol).serve()
     finally:
         sleep.stop()
@@ -519,32 +539,12 @@ def mode_serve(args: argparse.Namespace) -> int:
     try:
         dshpc_win.enable_dpi_awareness()
         dshpc_state.write_pid(data_dir / "server.pid", os.getpid())
-        state = dshpc_state.StateStore(
-            data_dir / "state.json",
-            remote_control=True,
-            keep_display=bool(config.sleep.get("keep_display_default", False)),
-        )
-        gate = dshpc_tools.InfoGate()
         sleep.start()
-        store = dshpc_tools.ScreenshotStore(
-            data_dir / "screenshots",
-            retention_hours=int(config.screenshot.get("retention_hours", 24)),
-            max_files=int(config.screenshot.get("max_files", 200)),
-        )
-        instructions = dshpc_mcp.build_instructions(
-            hostname=socket.gethostname(), port=config.port, version=dshpc_version.__version__
-        )
-        tools = dshpc_tools.Tools(
-            config=config,
-            state=state,
-            gate=gate,
+        state, gate, store, protocol = _build_runtime(
+            config,
             sleep=sleep,
-            store=store,
             url_base_provider=lambda: servers.public_base() if servers else "",
-            logger=logger,
-            started_at=STARTED_AT,
         )
-        protocol = dshpc_mcp.McpProtocol(tools=tools, instructions=instructions, logger=logger)
         servers = ListenerSet(
             config=config,
             protocol=protocol,
