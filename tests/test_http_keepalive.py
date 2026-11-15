@@ -33,6 +33,10 @@ SERVER = ROOT / "server" / "dshpc_server.py"
 REMOTE_URL = os.environ.get("DSHPC_TEST_URL", "").strip()
 REMOTE_TOKEN = os.environ.get("DSHPC_TEST_TOKEN", "").strip()
 MAX_BODY = int(os.environ.get("DSHPC_TEST_MAX_BODY", "4096"))
+# A 2 MB oversized body takes a while over Tailscale/DERP, so give remote
+# runs more headroom than the local throwaway server needs.
+DEFAULT_TIMEOUT = 60.0 if REMOTE_URL else 10.0
+CLIENT_TIMEOUT = float(os.environ.get("DSHPC_TEST_TIMEOUT", DEFAULT_TIMEOUT))
 HOST = "127.0.0.1"
 
 VALID_REQUEST = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
@@ -47,7 +51,7 @@ def free_port() -> int:
 class HttpConn:
     """Minimal HTTP/1.1 client that exposes the raw connection (keep-alive)."""
 
-    def __init__(self, port: int, timeout: float = 10.0):
+    def __init__(self, port: int, timeout: float = CLIENT_TIMEOUT):
         self.sock = socket.create_connection((HOST, port), timeout=timeout)
         self.sock.settimeout(timeout)
         self.rfile = self.sock.makefile("rb")

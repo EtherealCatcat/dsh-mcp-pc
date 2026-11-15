@@ -351,6 +351,17 @@ node tests/test_gateway_timeout.mjs     # P1 行为：pc_run 的 HTTP 超时随 
 `test_gateway_contract.py` 失败时说明 `gateway/tools.json` 需要按
 `server/dshpc_tools.TOOL_DEFS` 重新生成（快照只用于两台机器都离线时的 schema 回退）。
 
+同一套 keep-alive 断言可以直接打已经部署的机器（走 Tailscale，默认客户端超时放宽到 60 秒）：
+
+```bash
+DSHPC_TEST_URL=http://100.x.y.z:8765/mcp \
+DSHPC_TEST_TOKEN=<config.json 里的 token> \
+DSHPC_TEST_MAX_BODY=2097152 \
+python3 tests/test_http_keepalive.py
+```
+
+`DSHPC_TEST_TIMEOUT` 可覆盖客户端超时；链路慢（DERP 中继约 80 KB/s）时 2 MB 的超限请求要跑二十多秒。
+
 ## 变更记录
 
 见 [CHANGELOG.md](CHANGELOG.md)。0.2.0 起控制端只保留网关模式；旧的每台一个 bundle 的接入方式已移除。

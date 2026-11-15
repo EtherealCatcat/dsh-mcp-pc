@@ -27,6 +27,8 @@
   `--config` / `--url` / `--port`；非 Windows 平台的数据目录回退改为 `~/.dshpc`。
 - 新增 `tests/test_no_baked_values.py`：阻止个人 IP/路径回流，并校验端口、超时上限、安装脚本
   常量仍与 Python 单一来源一致。
+- 远程模式的 `test_http_keepalive.py` 默认把客户端超时放宽到 60 秒（可用 `DSHPC_TEST_TIMEOUT`
+  覆盖），避免经 Tailscale/DERP 上传 2 MB 超限请求时误报失败。
 
 ## 0.2.1 — 2026-11-15
 
